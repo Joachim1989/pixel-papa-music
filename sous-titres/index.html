@@ -506,15 +506,25 @@ function paintTicks(){
   });
 }
 
-/* Ligne dont l'intervalle [start,end) contient l'instant t, ou -1. Ignore
-   volontairement les lignes sans timing : pendant un calage encore en
-   cours (lignes null), rien ne peut jamais matcher, donc ça ne perturbe
+/* Ligne à afficher à l'instant t pour le suivi de lecture : DÉLIBÉRÉMENT
+   PAS l.end (qui contient le petit écart réglé pour l'export SRT/VTT — un
+   blanc entre deux sous-titres, utile à l'export mais pas à l'affichage
+   ici). Chaque ligne calée reste affichée jusqu'au début de la SUIVANTE :
+   correctif du 04/09/2026 (retour de terrain, capture mobile) — avec l.end,
+   ce micro-trou entre deux lignes faisait retomber l'affichage sur la ligne
+   sélectionnée pour le calage (restée bloquée sur la toute première ligne
+   depuis le pré-remplissage IA) l'espace d'une fraction de seconde à
+   CHAQUE changement de ligne : un flash visuel très gênant à l'usage.
+   Ignore volontairement les lignes sans timing : pendant un calage encore
+   en cours (lignes null), rien ne peut jamais matcher, donc ça ne perturbe
    pas le tap to sync — ça ne s'active qu'une fois une ligne réellement
    calée (à la main ou par l'IA). */
 function indexEnCours(t){
-  for(let i = 0; i < state.lines.length; i++){
-    const l = state.lines[i];
-    if(l.type === 'line' && l.start != null && l.end != null && t >= l.start && t < l.end) return i;
+  const idxs = state.lines.map((l,i) => (l.type === 'line' && l.start != null) ? i : -1).filter(i => i >= 0);
+  for(let k = 0; k < idxs.length; k++){
+    const debut = state.lines[idxs[k]].start;
+    const finAffichage = k + 1 < idxs.length ? state.lines[idxs[k+1]].start : Infinity;
+    if(t >= debut && t < finAffichage) return idxs[k];
   }
   return -1;
 }
