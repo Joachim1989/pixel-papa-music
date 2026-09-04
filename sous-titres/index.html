@@ -224,7 +224,7 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
   <div>
     <div class="card">
       <h2>Caler (tap to sync)</h2>
-      <p class="hint">Ça ne défile pas tout seul : écoute, et dès que la ligne du milieu commence à être chantée, appuie sur <kbd>Entrée</kbd> ou clique <b>● Marquer</b> — c'est ce clic qui fait avancer la ligne suivante, pas la musique.</p>
+      <p class="hint">Tant qu'une ligne n'a pas de timing, ça ne défile pas tout seul : écoute, et dès que la ligne du milieu commence à être chantée, appuie sur <kbd>Entrée</kbd> ou clique <b>● Marquer</b>. Une fois les lignes calées (à la main ou par l'IA), ce bloc suit la lecture tout seul — plus rien à taper, juste écouter.</p>
       <div id="progress"><div class="fill" id="progressFill"></div></div>
       <div class="prompteur">
         <div class="prev" id="pLignePrec">—</div>
@@ -253,7 +253,7 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
 
     <div class="card">
       <h2>Lignes</h2>
-      <p class="hint">Une fois une ligne calée (à la main ou par l'IA), elle se surligne en <span style="color:var(--gold-light)">doré</span> et défile automatiquement pendant la lecture — pour écouter et vérifier sans rien taper. Une ligne fausse ? Clique dessus (▶) pour t'y placer, puis corrige avec Entrée ou ±0.1s.</p>
+      <p class="hint">La ligne en cours de lecture s'affiche dans le bloc au-dessus (rien ne défile ici, pour ne pas faire sauter l'écran) — elle est juste <span style="color:var(--gold-light)">encadrée en doré</span> ci-dessous pour la repérer si besoin. Une ligne fausse ? Clique dessus (▶) pour t'y placer, puis corrige avec Entrée ou ±0.1s.</p>
       <div id="lignes"><p class="hint" style="padding:10px">Rien à afficher — découpe des paroles à gauche.</p></div>
     </div>
   </div>
@@ -461,14 +461,20 @@ player.addEventListener('timeupdate', () => {
     player.pause();
     state.previewEnd = null;
   }
-  // Suivi de lecture : surligne et fait défiler la ligne EN TRAIN d'être
-  // chantée dans la liste, indépendamment de la ligne sélectionnée pour le
-  // calage (state.selectedIndex) — pour pouvoir écouter et vérifier un
-  // calage déjà posé (par l'IA ou à la main) sans rien taper. Ne s'active
-  // que sur des lignes qui ont déjà un timing : pendant un calage encore en
-  // cours, ça ne bouge donc pas tant que la ligne n'est pas tapée.
+  // Suivi de lecture : la ligne EN TRAIN d'être chantée s'affiche dans le
+  // bloc fixe ci-dessus (prompteur) et se surligne dans la liste — sans
+  // jamais faire défiler la page (aucun scrollIntoView : sur mobile, un
+  // scroll automatique répété rend l'écran ingérable). Indépendant de la
+  // ligne sélectionnée pour le calage (state.selectedIndex) : ça ne
+  // s'active que sur des lignes qui ont déjà un timing, donc ça reste
+  // inerte pendant un calage encore en cours, tant que la ligne n'est pas
+  // tapée.
   const pi = indexEnCours(player.currentTime);
-  if(pi !== state.playingIndex){ state.playingIndex = pi; appliquerSurbrillanceLecture(true); }
+  if(pi !== state.playingIndex){
+    state.playingIndex = pi;
+    updatePrompteur();
+    appliquerSurbrillanceLecture();
+  }
 });
 player.addEventListener('loadedmetadata', () => { paintTicks(); render(); });
 /* Démarrer la lecture relâche le focus d'un champ de texte (paroles, titre...)
@@ -512,13 +518,30 @@ function indexEnCours(t){
   }
   return -1;
 }
-function appliquerSurbrillanceLecture(scroll){
+/* Surligne la ligne en cours dans la liste, SANS scrollIntoView : sur
+   mobile notamment, un scroll automatique à chaque changement de ligne
+   fait bouger l'écran en permanence — l'affichage qui compte pendant
+   l'écoute est le prompteur fixe (updatePrompteur), pas la liste. */
+function appliquerSurbrillanceLecture(){
   document.querySelectorAll('#lignes .ligne.playing').forEach(el => el.classList.remove('playing'));
   if(state.playingIndex < 0) return;
   const row = document.querySelector(`#lignes .ligne[data-idx="${state.playingIndex}"]`);
-  if(!row) return;
-  row.classList.add('playing');
-  if(scroll) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if(row) row.classList.add('playing');
+}
+
+/* Ligne à afficher dans le prompteur : celle en train d'être chantée si le
+   calage la couvre (state.playingIndex), sinon la cible du tap to sync
+   (state.selectedIndex) — pendant un calage frais, aucune ligne n'a encore
+   de timing donc playingIndex reste à -1 et ça retombe naturellement sur
+   le comportement d'origine (cible du prochain tap). */
+function ligneAffichee(){
+  return state.playingIndex >= 0 ? state.playingIndex : state.selectedIndex;
+}
+function updatePrompteur(){
+  const i = ligneAffichee();
+  $('pLignePrec').textContent = i >= 0 ? (state.lines[prevTimeableIndex(i)]?.text || "—") : "—";
+  $('pLigneNow').textContent  = i >= 0 ? state.lines[i].text : "Découpe des paroles pour commencer.";
+  $('pLigneNext').textContent = i >= 0 ? (state.lines[nextTimeableIndex(i)]?.text || "—") : "—";
 }
 
 /* ═══════════════════ 3. TAP TO SYNC ═══════════════════ */
@@ -717,12 +740,7 @@ function fmtShort(sec){
 
 function render(){
   paintTicks();
-
-  // Prompteur (ligne précédente / courante / suivante)
-  const i = state.selectedIndex;
-  $('pLignePrec').textContent = i >= 0 ? (state.lines[prevTimeableIndex(i)]?.text || "—") : "—";
-  $('pLigneNow').textContent  = i >= 0 ? state.lines[i].text : "Découpe des paroles pour commencer.";
-  $('pLigneNext').textContent = i >= 0 ? (state.lines[nextTimeableIndex(i)]?.text || "—") : "—";
+  updatePrompteur();
 
   // Liste des lignes
   const box = $('lignes');
@@ -784,10 +802,8 @@ function render(){
   if(prevAnim) prevAnim.value = buildAnimJSON();
 
   // La liste vient d'être reconstruite (innerHTML) : la classe "playing"
-  // posée par le suivi de lecture a donc disparu avec — la réappliquer
-  // sans redéclencher de scroll (un simple tap/nudge ne doit pas faire
-  // sauter la vue).
-  appliquerSurbrillanceLecture(false);
+  // posée par le suivi de lecture a donc disparu avec — la réappliquer.
+  appliquerSurbrillanceLecture();
 }
 
 /* ═══════════════════ 7. TEMPS & TÉLÉCHARGEMENT — utilitaires communs ═══════════════════ */
