@@ -98,6 +98,7 @@ audio{width:100%;margin-top:8px}
 .ligne:last-child{border-bottom:none}
 .ligne.selected{background:var(--surface-light)}
 .ligne.missing{background:rgba(244,67,54,.08)}
+.ligne.playing{box-shadow:inset 0 0 0 2px var(--gold-light)}
 .ligne .idx{width:22px;color:var(--text-muted);font-family:var(--mono);font-size:11px;flex-shrink:0}
 .ligne .txt{flex:1;background:transparent;border:none;color:var(--text);font-size:13px;padding:3px}
 .ligne .txt:focus{background:var(--bg);border-radius:4px}
@@ -252,6 +253,7 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
 
     <div class="card">
       <h2>Lignes</h2>
+      <p class="hint">Une fois une ligne calée (à la main ou par l'IA), elle se surligne en <span style="color:var(--gold-light)">doré</span> et défile automatiquement pendant la lecture — pour écouter et vérifier sans rien taper. Une ligne fausse ? Clique dessus (▶) pour t'y placer, puis corrige avec Entrée ou ±0.1s.</p>
       <div id="lignes"><p class="hint" style="padding:10px">Rien à afficher — découpe des paroles à gauche.</p></div>
     </div>
   </div>
@@ -341,7 +343,8 @@ const state = {
   lines: [],
   selectedIndex: -1,
   audioLoaded: false,
-  previewEnd: null // fin de la prévisualisation "hook" en cours (voir onglet 6)
+  previewEnd: null, // fin de la prévisualisation "hook" en cours (voir onglet 6)
+  playingIndex: -1 // ligne actuellement chantée d'après le calage existant (suivi de lecture)
 };
 
 const $ = id => document.getElementById(id);
@@ -458,6 +461,14 @@ player.addEventListener('timeupdate', () => {
     player.pause();
     state.previewEnd = null;
   }
+  // Suivi de lecture : surligne et fait défiler la ligne EN TRAIN d'être
+  // chantée dans la liste, indépendamment de la ligne sélectionnée pour le
+  // calage (state.selectedIndex) — pour pouvoir écouter et vérifier un
+  // calage déjà posé (par l'IA ou à la main) sans rien taper. Ne s'active
+  // que sur des lignes qui ont déjà un timing : pendant un calage encore en
+  // cours, ça ne bouge donc pas tant que la ligne n'est pas tapée.
+  const pi = indexEnCours(player.currentTime);
+  if(pi !== state.playingIndex){ state.playingIndex = pi; appliquerSurbrillanceLecture(true); }
 });
 player.addEventListener('loadedmetadata', () => { paintTicks(); render(); });
 /* Démarrer la lecture relâche le focus d'un champ de texte (paroles, titre...)
@@ -487,6 +498,27 @@ function paintTicks(){
     t.style.left = (l.start / d * 100) + "%";
     box.appendChild(t);
   });
+}
+
+/* Ligne dont l'intervalle [start,end) contient l'instant t, ou -1. Ignore
+   volontairement les lignes sans timing : pendant un calage encore en
+   cours (lignes null), rien ne peut jamais matcher, donc ça ne perturbe
+   pas le tap to sync — ça ne s'active qu'une fois une ligne réellement
+   calée (à la main ou par l'IA). */
+function indexEnCours(t){
+  for(let i = 0; i < state.lines.length; i++){
+    const l = state.lines[i];
+    if(l.type === 'line' && l.start != null && l.end != null && t >= l.start && t < l.end) return i;
+  }
+  return -1;
+}
+function appliquerSurbrillanceLecture(scroll){
+  document.querySelectorAll('#lignes .ligne.playing').forEach(el => el.classList.remove('playing'));
+  if(state.playingIndex < 0) return;
+  const row = document.querySelector(`#lignes .ligne[data-idx="${state.playingIndex}"]`);
+  if(!row) return;
+  row.classList.add('playing');
+  if(scroll) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
 /* ═══════════════════ 3. TAP TO SYNC ═══════════════════ */
@@ -709,6 +741,7 @@ function render(){
       }
       const row = document.createElement('div');
       row.className = 'ligne' + (idx === state.selectedIndex ? ' selected' : '') + (l.start == null ? ' missing' : '');
+      row.dataset.idx = idx;
       row.innerHTML = `
         <span class="idx">${n++}</span>
         <input class="txt" value="${escHtml(l.text)}">
@@ -749,6 +782,12 @@ function render(){
 
   const prevAnim = $('animPreview');
   if(prevAnim) prevAnim.value = buildAnimJSON();
+
+  // La liste vient d'être reconstruite (innerHTML) : la classe "playing"
+  // posée par le suivi de lecture a donc disparu avec — la réappliquer
+  // sans redéclencher de scroll (un simple tap/nudge ne doit pas faire
+  // sauter la vue).
+  appliquerSurbrillanceLecture(false);
 }
 
 /* ═══════════════════ 7. TEMPS & TÉLÉCHARGEMENT — utilitaires communs ═══════════════════ */
