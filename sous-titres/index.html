@@ -3,24 +3,38 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sous-titres — Pixel Papa</title>
+<title>Pixel Papa — Musique</title>
 <!--
-  PIXEL PAPA — MUSIQUE (dépôt dédié, sans rapport avec insert-coin/
-  pixelpapa.be). Page autonome, un seul fichier, aucune dépendance, aucun
-  build : s'ouvre directement en local (double-clic) ou se sert telle
-  quelle par GitHub Pages depuis sous-titres/ si ce dépôt est un jour publié.
+  PIXEL PAPA — MUSIQUE : boîte à outils autour d'UNE chanson dont les
+  paroles sont déjà connues (écrites pour le prompt Suno). Page autonome,
+  un seul fichier, aucune dépendance, aucun build : s'ouvre en local
+  (double-clic) ou se sert telle quelle par GitHub Pages si ce dépôt est
+  un jour publié.
 
-  BUT : caler des sous-titres (SRT/VTT) sur une chanson dont tu connais déjà
-  les paroles à l'exact (issues de ton prompt Suno) — le problème n'est donc
-  pas la transcription mais le TIMING. Deux méthodes, combinables :
+  IDÉE CENTRALE : un seul calage (paroles + audio + timecodes, onglet
+  "Calage"), et TOUT le reste en découle sans reprendre le travail :
+    - Sous-titres  : export .srt / .vtt pour le montage.
+    - Karaoké      : export .ass (surlignage doré), ligne entière (exact,
+                     dérivé du calage) ou mot par mot (ESTIMATION par
+                     longueur de mot — pas un vrai calage mot à mot).
+    - Repères animation : le même minutage en .json, pour caler des
+                     keyframes (After Effects/Blender) sans réécouter au
+                     casque.
+    - Pack SEO/pub : titres, description YOUTUBE AVEC CHAPITRES, tags et
+                     hashtags. Les horodatages des chapitres viennent du
+                     calage réel (jamais inventés par l'IA) ; seule la
+                     partie texte (titres, phrases d'intro/outro, mots-clés)
+                     est générée.
+    - Hook/teaser  : repère le refrain (balise [Refrain]/[Chorus], ou à
+                     défaut un bloc de lignes qui se répète à l'identique)
+                     et propose une fenêtre de clip court pour Shorts/Reels.
+
+  Calage lui-même, deux méthodes combinables :
     1) « Tap to sync » : tu écoutes, tu tapes Entrée à chaque ligne — fiable
-       à 100%, aucune IA requise, ~1x la durée du morceau.
+       à 100%, aucune IA requise.
     2) Pré-remplissage IA (Gemini, clé perso) : envoie l'audio + les paroles
        numérotées, demande un timestamp par ligne — dégrossit le travail,
-       à corriger ensuite à l'oreille (l'IA cale bien mais pas parfaitement
-       sur du chant).
-  Export SRT + VTT, prêts à importer dans Premiere/Resolve/CapCut ou à
-  incruster en dur avec ffmpeg.
+       à corriger ensuite à l'oreille (le chant reste imprécis pour une IA).
 -->
 <style>
 :root{
@@ -39,12 +53,19 @@ body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15
 .eyebrow{font-family:var(--cond);font-weight:700;letter-spacing:1px;text-transform:uppercase;font-size:12px;color:var(--gold-dim);margin:0 0 2px}
 h1{font-family:var(--cond);font-weight:700;letter-spacing:.3px;font-size:26px;margin:0 0 2px}
 h2{font-family:var(--cond);font-weight:700;font-size:16px;letter-spacing:.5px;text-transform:uppercase;color:var(--gold);margin:0 0 10px}
-header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:14px}
-header p{margin:0;color:var(--text-muted);font-size:13px}
+header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:14px}
+header p{margin:0;color:var(--text-muted);font-size:13px;max-width:60ch}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.tab{background:var(--surface);border:1px solid var(--border);color:var(--text-muted);border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+.tab:hover{color:var(--text);border-color:var(--gold-dim)}
+.tab.active{background:var(--gold);color:#161206;border-color:var(--gold)}
+.tabpanel{display:none}
+.tabpanel.active{display:block}
 .grid{display:grid;grid-template-columns:1fr;gap:16px}
 @media(min-width:960px){.grid{grid-template-columns:380px 1fr}}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
 .card + .card{margin-top:14px}
+.card.nested{background:var(--bg)}
 textarea{width:100%;min-height:180px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--mono);font-size:13px;resize:vertical}
 input[type=text],input[type=number],input[type=password],select{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 8px;font-family:var(--body);font-size:13px}
 label{font-size:12px;color:var(--text-muted);display:block;margin:8px 0 3px}
@@ -90,6 +111,10 @@ kbd{background:var(--surface-light);border:1px solid var(--border);border-radius
 .exportbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 details{margin-top:10px}
 details summary{cursor:pointer;color:var(--text-muted);font-size:12.5px}
+.champ-titre{font-size:13px}
+.titre-row{display:flex;align-items:center;gap:8px;margin-top:4px}
+.titre-row .txt{flex:1;font-size:13px}
+code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px;border-radius:4px}
 </style>
 </head>
 <body>
@@ -97,28 +122,43 @@ details summary{cursor:pointer;color:var(--text-muted);font-size:12.5px}
 <header>
   <div>
     <p class="eyebrow">Pixel Papa — Musique</p>
-    <h1>🎵 Sous-titres</h1>
-    <p>Cale les paroles d'une chanson sur son audio, exporte en .srt / .vtt pour le montage.</p>
+    <h1>🎵 Boîte à outils chanson</h1>
+    <p>Un seul calage (paroles + audio), et tout en sort : sous-titres, karaoké, repères d'animation, pack SEO et teaser.</p>
   </div>
 </header>
 
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="calage">1. Calage</button>
+  <button class="tab" data-tab="soustitres">2. Sous-titres</button>
+  <button class="tab" data-tab="karaoke">3. Karaoké</button>
+  <button class="tab" data-tab="animation">4. Repères animation</button>
+  <button class="tab" data-tab="seo">5. Pack SEO / pub</button>
+  <button class="tab" data-tab="hook">6. Hook / teaser</button>
+</nav>
+
+<!-- ═══════════════════ ONGLET 1 : CALAGE (paroles, audio, tap-to-sync) ═══════════════════ -->
+<section id="tab-calage" class="tabpanel active">
 <div class="grid">
 
-  <!-- COLONNE GAUCHE : entrées + réglages + export -->
+  <!-- COLONNE GAUCHE : entrées + IA + réglages -->
   <div>
     <div class="card">
       <h2>1. Paroles</h2>
+      <label for="titreMorceau">Titre du morceau (optionnel — réutilisé par le pack SEO et les repères d'animation)</label>
+      <input type="text" id="titreMorceau" style="width:100%" placeholder="ex. Level Up">
+      <label for="paroles" style="margin-top:10px">Paroles</label>
       <textarea id="paroles" placeholder="[Couplet 1]
 Colle ici les paroles exactes, une ligne par ligne.
 Les balises entre crochets ([Refrain], [Couplet 2]...) sont
 reconnues comme repères de structure : elles ne sont pas
-exportées comme sous-titre, juste affichées pour te repérer.
+exportées comme sous-titre, juste affichées pour te repérer
+(et réutilisées pour les chapitres et le hook).
 
 [Refrain]
 Une ligne = une ligne de sous-titre à caler."></textarea>
       <div class="row">
         <button id="btnDecouper" class="primary">Découper en lignes</button>
-        <span class="hint" id="hintDecoupe">Format Suno accepté tel quel (balises [..] ignorées à l'export).</span>
+        <span class="hint" id="hintDecoupe">Format Suno accepté tel quel.</span>
       </div>
     </div>
 
@@ -144,14 +184,14 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
     </div>
 
     <div class="card">
-      <h2>3. Pré-remplissage IA (optionnel)</h2>
-      <p class="hint">Envoie l'audio + les paroles à Gemini pour un premier calage automatique — à corriger ensuite à l'oreille (méthode 1). Le chant reste imprécis pour une IA, ne saute pas la relecture.</p>
+      <h2>3. Clé IA (Gemini)</h2>
+      <p class="hint">Utilisée pour le pré-remplissage du calage (ci-dessous) ET le pack SEO (onglet 5). Une seule clé pour tout l'outil.</p>
       <label for="geminiKey">Clé API Gemini (perso, stockée uniquement dans ton navigateur)</label>
       <input type="password" id="geminiKey" style="width:100%" placeholder="AIza…">
       <label for="geminiModel">Modèle</label>
       <input type="text" id="geminiModel" style="width:100%" value="gemini-3.5-flash">
       <div class="row" style="margin-top:8px">
-        <button id="btnAI">Pré-remplir avec l'IA</button>
+        <button id="btnAI">Pré-remplir le calage avec l'IA</button>
       </div>
       <div class="status" id="aiStatus"></div>
       <details>
@@ -175,16 +215,6 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
           <label for="dureeFin">Durée dernière ligne (s)</label>
           <input type="number" id="dureeFin" value="3" step="0.5" min="0.5">
         </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>5. Export</h2>
-      <div class="status" id="exportStatus">Aucune ligne pour l'instant.</div>
-      <div class="exportbtns">
-        <button id="btnSRT" class="primary" disabled>Télécharger .srt</button>
-        <button id="btnVTT" disabled>Télécharger .vtt</button>
-        <button id="btnCopySRT" class="ghost small" disabled>Copier le .srt</button>
       </div>
     </div>
   </div>
@@ -226,6 +256,78 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
   </div>
 
 </div>
+</section>
+
+<!-- ═══════════════════ ONGLET 2 : SOUS-TITRES ═══════════════════ -->
+<section id="tab-soustitres" class="tabpanel">
+  <div class="card" style="max-width:560px">
+    <h2>Export sous-titres</h2>
+    <div class="status" id="exportStatus">Aucune ligne pour l'instant.</div>
+    <div class="exportbtns">
+      <button id="btnSRT" class="primary" disabled>Télécharger .srt</button>
+      <button id="btnVTT" disabled>Télécharger .vtt</button>
+      <button id="btnCopySRT" class="ghost small" disabled>Copier le .srt</button>
+    </div>
+    <p class="hint">Importe le .srt/.vtt dans Premiere, Resolve ou CapCut — ou incruste-le en dur avec ffmpeg :<br><code>ffmpeg -i video.mp4 -vf subtitles=sous-titres.srt sortie.mp4</code></p>
+  </div>
+</section>
+
+<!-- ═══════════════════ ONGLET 3 : KARAOKÉ (.ass) ═══════════════════ -->
+<section id="tab-karaoke" class="tabpanel">
+  <div class="card" style="max-width:560px">
+    <h2>Export karaoké (.ass)</h2>
+    <p class="hint">Sous-titres façon karaoké (surlignage doré) pour Shorts/Reels/TikTok — importe dans Aegisub/Resolve, ou incruste avec ffmpeg :<br><code>ffmpeg -i video.mp4 -vf ass=karaoke.ass sortie.mp4</code></p>
+    <label for="assMode">Mode de surlignage</label>
+    <select id="assMode">
+      <option value="ligne">Ligne entière (calage exact — recommandé)</option>
+      <option value="mot">Mot par mot (ESTIMATION)</option>
+    </select>
+    <p class="hint warn" id="assModeHint" style="display:none">Le découpage mot par mot répartit la durée de la ligne selon la longueur de chaque mot — ce n'est PAS un vrai calage mot à mot. Vérifie le rendu avant de publier.</p>
+    <div class="row" style="margin-top:8px">
+      <div><label for="assTaille">Taille du texte</label><input type="number" id="assTaille" value="72" min="20" step="2"></div>
+    </div>
+    <div class="status" id="karaokeStatus"></div>
+    <div class="exportbtns"><button id="btnASS" class="primary" disabled>Télécharger .ass</button></div>
+  </div>
+</section>
+
+<!-- ═══════════════════ ONGLET 4 : REPÈRES ANIMATION (.json) ═══════════════════ -->
+<section id="tab-animation" class="tabpanel">
+  <div class="card" style="max-width:620px">
+    <h2>Repères pour l'animation</h2>
+    <p class="hint">Le minutage de chaque ligne et de chaque section en JSON — à lire depuis un script After Effects/Blender, ou juste comme feuille de route pour animer à l'œil sans réécouter au casque.</p>
+    <div class="status" id="animStatus"></div>
+    <div class="exportbtns"><button id="btnJSON" class="primary" disabled>Télécharger .json</button></div>
+    <details>
+      <summary>Aperçu</summary>
+      <textarea id="animPreview" readonly style="min-height:240px;font-size:11px"></textarea>
+    </details>
+  </div>
+</section>
+
+<!-- ═══════════════════ ONGLET 5 : PACK SEO / PUB ═══════════════════ -->
+<section id="tab-seo" class="tabpanel">
+  <div class="card" style="max-width:640px">
+    <h2>Pack SEO / publication</h2>
+    <p class="hint">Titres, description avec chapitres, tags et hashtags — générés à partir des paroles. Les horodatages des chapitres viennent de ton calage réel ([Refrain]/[Couplet]), jamais inventés par l'IA : seule la partie texte est générée.</p>
+    <label for="seoContexte">Contexte / univers (optionnel — genre, ambiance, public visé…)</label>
+    <textarea id="seoContexte" style="min-height:70px" placeholder="ex. Rap pixel-art pour ados, univers rétro-gaming, ton second degré..."></textarea>
+    <div class="row" style="margin-top:8px"><button id="btnSEO" class="primary">Générer le pack SEO</button></div>
+    <div class="status" id="seoStatus"></div>
+    <div id="seoResult"></div>
+  </div>
+</section>
+
+<!-- ═══════════════════ ONGLET 6 : HOOK / TEASER ═══════════════════ -->
+<section id="tab-hook" class="tabpanel">
+  <div class="card" style="max-width:560px">
+    <h2>Extraction du refrain / hook</h2>
+    <p class="hint">Repère le refrain à partir de tes balises [Refrain]/[Chorus]/[Hook], ou à défaut du premier bloc de lignes qui se répète à l'identique — utile pour un teaser court (Shorts/Reels).</p>
+    <div class="row"><button id="btnHook" class="primary">Détecter le refrain</button></div>
+    <div class="status" id="hookStatus"></div>
+    <div id="hookResult"></div>
+  </div>
+</section>
 
 <script>
 "use strict";
@@ -237,7 +339,8 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
 const state = {
   lines: [],
   selectedIndex: -1,
-  audioLoaded: false
+  audioLoaded: false,
+  previewEnd: null // fin de la prévisualisation "hook" en cours (voir onglet 6)
 };
 
 const $ = id => document.getElementById(id);
@@ -245,10 +348,18 @@ const player   = $('player');
 const dropzone = $('dropzone');
 const fileInput= $('fileAudio');
 
+/* ═══════════════════ ONGLETS ═══════════════════ */
+document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => {
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tabpanel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  $('tab-' + btn.dataset.tab).classList.add('active');
+});
+
 /* ═══════════════════ PERSISTANCE (brouillon local) ═══════════════════
-   Seuls le texte des paroles et les timings sont sauvés — jamais l'audio
-   (trop lourd pour localStorage) ni la clé Gemini (namespace séparé,
-   volontairement distinct de l'appli Insert Coin : deux outils, deux clés). */
+   Seuls le texte, les timings et les petits champs sont sauvés — jamais
+   l'audio (trop lourd pour localStorage) ni la clé Gemini (namespace
+   séparé, propre à cet outil). */
 const DRAFT_KEY = "pixelpapa.subtitles.draft.v1";
 const GEMINI_KEY_STORE = "pixelpapa.subtitles.gemini.key";
 const GEMINI_MODEL_STORE = "pixelpapa.subtitles.gemini.model";
@@ -256,7 +367,12 @@ const GEMINI_FALLBACK = ["gemini-3.6-flash","gemini-3.5-flash","gemini-3.5-flash
 
 function draftSave(){
   try{
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({ paroles: $('paroles').value, lines: state.lines }));
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      paroles: $('paroles').value,
+      lines: state.lines,
+      titre: $('titreMorceau').value,
+      seoContexte: $('seoContexte').value
+    }));
   }catch(e){}
 }
 function draftLoad(){
@@ -264,6 +380,8 @@ function draftLoad(){
     const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
     if(!d) return;
     if(d.paroles) $('paroles').value = d.paroles;
+    if(d.titre) $('titreMorceau').value = d.titre;
+    if(d.seoContexte) $('seoContexte').value = d.seoContexte;
     if(Array.isArray(d.lines) && d.lines.length){ state.lines = d.lines; state.selectedIndex = firstTimeableIndex(); }
   }catch(e){}
 }
@@ -273,6 +391,8 @@ try{
   const m = localStorage.getItem(GEMINI_MODEL_STORE);
   if(m) $('geminiModel').value = m;
 }catch(e){}
+$('titreMorceau').addEventListener('input', draftSave);
+$('seoContexte').addEventListener('input', draftSave);
 
 /* ═══════════════════ 1. PAROLES → LIGNES ═══════════════════ */
 function parseParoles(raw){
@@ -332,8 +452,13 @@ player.addEventListener('timeupdate', () => {
   $('timecode').textContent = fmtShort(player.currentTime) + " / " + fmtShort(player.duration || 0);
   const d = player.duration || 0;
   if(d) $('progressFill').style.width = (player.currentTime / d * 100) + "%";
+  // Prévisualisation d'un passage borné (onglet Hook) : coupe à la fin prévue.
+  if(state.previewEnd != null && player.currentTime >= state.previewEnd){
+    player.pause();
+    state.previewEnd = null;
+  }
 });
-player.addEventListener('loadedmetadata', paintTicks);
+player.addEventListener('loadedmetadata', () => { paintTicks(); render(); });
 
 $('progress').addEventListener('click', e => {
   const d = player.duration;
@@ -432,7 +557,9 @@ document.addEventListener('keydown', e => {
   else if(e.code === 'Delete' || e.code === 'Backspace'){ e.preventDefault(); $('btnClearTs').click(); }
 });
 
-/* ═══════════════════ 4. PRÉ-REMPLISSAGE IA (Gemini, clé perso) ═══════════════════ */
+/* ═══════════════════ 4. GEMINI — appels partagés ═══════════════════
+   Deux formes : avec audio (calage) et texte seul (pack SEO). Même clé,
+   même chaîne de repli entre modèles. */
 function fileToBase64(file){
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -442,20 +569,14 @@ function fileToBase64(file){
   });
 }
 
-async function callGeminiAlign(model, base64, mime, prompt){
+async function callGemini(model, parts, schema){
   const key = $('geminiKey').value.trim();
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [
-        { inlineData: { mimeType: mime, data: base64 } },
-        { text: prompt }
-      ]}],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: { type: "ARRAY", items: { type: "NUMBER" } }
-      }
+      contents: [{ role: "user", parts }],
+      generationConfig: { responseMimeType: "application/json", responseSchema: schema }
     })
   });
   if(!res.ok){
@@ -466,11 +587,24 @@ async function callGeminiAlign(model, base64, mime, prompt){
   const cand = (data.candidates || [])[0];
   if(!cand) throw new Error(data.promptFeedback?.blockReason || "Réponse vide");
   const raw = ((cand.content && cand.content.parts) || []).map(p => p.text || "").join("");
-  const arr = JSON.parse(raw);
-  if(!Array.isArray(arr)) throw new Error("Réponse inattendue (pas un tableau)");
-  return arr;
+  return JSON.parse(raw);
 }
 
+async function callGeminiChain(parts, schema){
+  const model = $('geminiModel').value.trim() || GEMINI_FALLBACK[0];
+  const chain = [model, ...GEMINI_FALLBACK.filter(m => m !== model)];
+  let lastErr = "";
+  for(const m of chain){
+    try{
+      const out = await callGemini(m, parts, schema);
+      if(m !== model){ $('geminiModel').value = m; try{ localStorage.setItem(GEMINI_MODEL_STORE, m); }catch(e){} }
+      return out;
+    }catch(err){ lastErr = err.message || String(err); }
+  }
+  throw new Error(lastErr || "Échec sur tous les modèles.");
+}
+
+/* ═══════════════════ 5. PRÉ-REMPLISSAGE IA DU CALAGE ═══════════════════ */
 $('btnAI').onclick = async () => {
   const status = $('aiStatus');
   if(!state.audioLoaded || !state._file){ status.innerHTML = '<span class="bad">Charge un fichier audio d\'abord.</span>'; return; }
@@ -504,14 +638,11 @@ Réponds uniquement avec un tableau JSON de ${idxs.length} nombres, un par ligne
 Paroles :
 ${promptListe}`;
 
-    const model = $('geminiModel').value.trim() || GEMINI_FALLBACK[0];
-    const chain = [model, ...GEMINI_FALLBACK.filter(m => m !== model)];
-    let arr = null, lastErr = "";
-    for(const m of chain){
-      try{ arr = await callGeminiAlign(m, base64, mime, prompt); if(m !== model){ $('geminiModel').value = m; localStorage.setItem(GEMINI_MODEL_STORE, m); } break; }
-      catch(err){ lastErr = err.message || String(err); }
-    }
-    if(!arr) throw new Error(lastErr || "Échec sur tous les modèles.");
+    const arr = await callGeminiChain(
+      [{ inlineData: { mimeType: mime, data: base64 } }, { text: prompt }],
+      { type: "ARRAY", items: { type: "NUMBER" } }
+    );
+    if(!Array.isArray(arr)) throw new Error("Réponse inattendue (pas un tableau)");
 
     const dur = player.duration || Infinity;
     const got = Math.min(arr.length, idxs.length);
@@ -534,7 +665,7 @@ ${promptListe}`;
   }
 };
 
-/* ═══════════════════ 5. RENDU ═══════════════════ */
+/* ═══════════════════ 6. RENDU (calage) ═══════════════════ */
 function escHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -596,19 +727,23 @@ function render(){
     });
   }
 
-  // Statut export
+  // Statut de complétude, partagé par les onglets Sous-titres / Karaoké / Repères animation.
   const timeable = state.lines.filter(l => l.type === 'line');
   const done = timeable.filter(l => l.start != null).length;
   const complete = timeable.length > 0 && done === timeable.length;
-  $('exportStatus').innerHTML = timeable.length
+  const txtStatut = timeable.length
     ? (complete
         ? `<span class="ok">${done}/${timeable.length} lignes calées — prêt à exporter.</span>`
         : `<span class="warn">${done}/${timeable.length} lignes calées — complète les lignes en rouge avant d'exporter.</span>`)
     : "Découpe des paroles pour commencer.";
-  ['btnSRT','btnVTT','btnCopySRT'].forEach(id => $(id).disabled = !complete);
+  ['exportStatus','karaokeStatus','animStatus'].forEach(id => { const el = $(id); if(el) el.innerHTML = txtStatut; });
+  ['btnSRT','btnVTT','btnCopySRT','btnASS','btnJSON'].forEach(id => $(id).disabled = !complete);
+
+  const prevAnim = $('animPreview');
+  if(prevAnim) prevAnim.value = buildAnimJSON();
 }
 
-/* ═══════════════════ 6. EXPORT SRT / VTT ═══════════════════ */
+/* ═══════════════════ 7. TEMPS & TÉLÉCHARGEMENT — utilitaires communs ═══════════════════ */
 function fmtTime(sec, sep){
   sec = Math.max(0, sec);
   const h = Math.floor(sec/3600);
@@ -618,15 +753,6 @@ function fmtTime(sec, sep){
   const pad = (n,l) => String(n).padStart(l,"0");
   return `${pad(h,2)}:${pad(m,2)}:${pad(s,2)}${sep}${pad(ms,3)}`;
 }
-
-function buildSRT(){
-  const lines = state.lines.filter(l => l.type === 'line' && l.start != null);
-  return lines.map((l,i) => `${i+1}\n${fmtTime(l.start,',')} --> ${fmtTime(l.end,',')}\n${l.text}\n`).join("\n");
-}
-function buildVTT(){
-  const lines = state.lines.filter(l => l.type === 'line' && l.start != null);
-  return "WEBVTT\n\n" + lines.map((l,i) => `${i+1}\n${fmtTime(l.start,'.')} --> ${fmtTime(l.end,'.')}\n${l.text}\n`).join("\n");
-}
 function download(filename, content, mime){
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -635,11 +761,329 @@ function download(filename, content, mime){
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
+/* ═══════════════════ 8. EXPORT SRT / VTT (onglet 2) ═══════════════════ */
+function buildSRT(){
+  const lines = state.lines.filter(l => l.type === 'line' && l.start != null);
+  return lines.map((l,i) => `${i+1}\n${fmtTime(l.start,',')} --> ${fmtTime(l.end,',')}\n${l.text}\n`).join("\n");
+}
+function buildVTT(){
+  const lines = state.lines.filter(l => l.type === 'line' && l.start != null);
+  return "WEBVTT\n\n" + lines.map((l,i) => `${i+1}\n${fmtTime(l.start,'.')} --> ${fmtTime(l.end,'.')}\n${l.text}\n`).join("\n");
+}
 $('btnSRT').onclick = () => download("sous-titres.srt", buildSRT(), "application/x-subrip");
 $('btnVTT').onclick = () => download("sous-titres.vtt", buildVTT(), "text/vtt");
 $('btnCopySRT').onclick = async () => {
   try{ await navigator.clipboard.writeText(buildSRT()); $('btnCopySRT').textContent = "Copié ✓"; setTimeout(() => $('btnCopySRT').textContent = "Copier le .srt", 1500); }
   catch(e){ alert("Impossible de copier automatiquement — sélectionne dans le fichier téléchargé."); }
+};
+
+/* ═══════════════════ 9. EXPORT KARAOKÉ .ASS (onglet 3) ═══════════════════
+   Palette Pixel Papa reprise telle quelle (blanc texte, or au surlignage).
+   Mode "ligne" : un seul \k par ligne, durée exacte tapée — fiable à 100%.
+   Mode "mot"   : ESTIMATION — la durée de la ligne est répartie entre les
+   mots au prorata de leur longueur (+1 pour l'espace). Ce n'est pas un
+   calage réel mot à mot, juste une approximation visuelle raisonnable en
+   l'absence d'alignement forcé. */
+$('assMode').addEventListener('change', () => {
+  $('assModeHint').style.display = $('assMode').value === 'mot' ? 'block' : 'none';
+});
+
+function secToAssTime(sec){
+  sec = Math.max(0, sec);
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = Math.floor(sec%60);
+  const cs = Math.round((sec - Math.floor(sec)) * 100);
+  const pad = (n,l) => String(n).padStart(l,'0');
+  return `${h}:${pad(m,2)}:${pad(s,2)}.${pad(cs,2)}`;
+}
+function assEsc(s){ return String(s).replace(/[{}]/g,''); }
+
+function assKaraokeMot(l){
+  const mots = l.text.split(/\s+/).filter(Boolean);
+  if(!mots.length) return "";
+  const totalCs = Math.max(mots.length, Math.round((l.end - l.start) * 100));
+  const poids = mots.map(m => m.length + 1);
+  const totalPoids = poids.reduce((a,b) => a+b, 0);
+  let alloue = 0;
+  const durees = poids.map((p,i) => {
+    if(i === poids.length - 1) return Math.max(1, totalCs - alloue);
+    const d = Math.max(1, Math.round(totalCs * p / totalPoids));
+    alloue += d;
+    return d;
+  });
+  return mots.map((m,i) => `{\\k${durees[i]}}${assEsc(m)} `).join('').trim();
+}
+
+function buildASS(mode, taille){
+  const lines = state.lines.filter(l => l.type === 'line' && l.start != null);
+  const header = `[Script Info]
+Title: Pixel Papa — Karaoké
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Karaoke,Arial Black,${taille},&H00F2F5F4,&H0037AFD4,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,2,2,60,60,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  const body = lines.map(l => {
+    const txt = mode === 'mot' ? assKaraokeMot(l) : `{\\k${Math.max(1,Math.round((l.end-l.start)*100))}}${assEsc(l.text)}`;
+    return `Dialogue: 0,${secToAssTime(l.start)},${secToAssTime(l.end)},Karaoke,,0,0,0,,${txt}`;
+  }).join("\n");
+  return header + body + "\n";
+}
+$('btnASS').onclick = () => {
+  const mode = $('assMode').value;
+  const taille = parseInt($('assTaille').value, 10) || 72;
+  download("karaoke.ass", buildASS(mode, taille), "text/plain");
+};
+
+/* ═══════════════════ 10. REPÈRES SECTION (partagés animation + SEO) ═══════════════════
+   Un repère par changement de balise [Refrain]/[Couplet]... au moment où
+   la première ligne CALÉE qui suit commence. Les temps sont réels (pas
+   forcés à 0) — c'est l'onglet SEO qui applique la contrainte YouTube
+   "premier chapitre à 0:00", pas cette fonction générique. */
+function sectionMarkers(){
+  const out = [];
+  let currentLabel = null, need = true;
+  for(const l of state.lines){
+    if(l.type === 'section'){
+      if(l.text !== currentLabel){ currentLabel = l.text; need = true; }
+      continue;
+    }
+    if(l.type === 'line' && l.start != null && need){
+      out.push({ label: currentLabel || 'Intro', t: l.start });
+      need = false;
+    }
+  }
+  return out;
+}
+
+/* ═══════════════════ 11. REPÈRES ANIMATION .JSON (onglet 4) ═══════════════════ */
+function buildAnimJSON(){
+  const lignes = state.lines
+    .filter(l => l.type === 'line' && l.start != null)
+    .map((l,i) => ({ index: i+1, texte: l.text, debut: +l.start.toFixed(3), fin: +l.end.toFixed(3) }));
+  return JSON.stringify({
+    titre: ($('titreMorceau').value || "").trim() || null,
+    duree: player.duration ? +player.duration.toFixed(3) : null,
+    sections: sectionMarkers().map(s => ({ nom: s.label, debut: +s.t.toFixed(3) })),
+    lignes
+  }, null, 2);
+}
+$('btnJSON').onclick = () => download("reperes-animation.json", buildAnimJSON(), "application/json");
+
+/* ═══════════════════ 12. PACK SEO / PUB (onglet 5) ═══════════════════ */
+const SEO_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    titres: { type: "ARRAY", items: { type: "STRING" } },
+    description_intro: { type: "STRING" },
+    description_outro: { type: "STRING" },
+    tags: { type: "ARRAY", items: { type: "STRING" } },
+    hashtags: { type: "ARRAY", items: { type: "STRING" } }
+  }
+};
+
+function fmtChapTime(sec){
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  const pad = n => String(n).padStart(2,'0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+/* Règles YouTube pour les chapitres : premier repère à 0:00 pile, au moins
+   10s entre deux repères, au moins 3 pour que YouTube les affiche — sous
+   ce seuil on n'inclut simplement pas de chapitres plutôt que d'en publier
+   une liste invalide. */
+function buildChapitresYouTube(){
+  const raw = sectionMarkers().map(c => ({ ...c }));
+  if(!raw.length) return [];
+  raw[0].t = 0;
+  const chs = [raw[0]];
+  for(let i = 1; i < raw.length; i++){
+    if(raw[i].t - chs[chs.length-1].t >= 10) chs.push(raw[i]);
+  }
+  return chs.length >= 3 ? chs : [];
+}
+
+function copyBtn(label, texte){
+  const b = document.createElement('button');
+  b.className = 'small mini';
+  b.textContent = label;
+  b.onclick = async () => {
+    try{ await navigator.clipboard.writeText(texte); b.textContent = 'Copié ✓'; setTimeout(() => b.textContent = label, 1500); }
+    catch(e){ alert('Impossible de copier automatiquement.'); }
+  };
+  return b;
+}
+function champSEO(titre, valeur){
+  const card = document.createElement('div');
+  card.className = 'card nested';
+  card.style.marginTop = '10px';
+  const h = document.createElement('h2'); h.style.fontSize = '13px'; h.textContent = titre;
+  const ta = document.createElement('textarea'); ta.readOnly = true; ta.style.minHeight = '80px'; ta.value = valeur;
+  const btns = document.createElement('div'); btns.className = 'exportbtns';
+  btns.appendChild(copyBtn('Copier', valeur));
+  card.append(h, ta, btns);
+  return card;
+}
+function blocTitres(titres){
+  const card = document.createElement('div');
+  card.className = 'card nested';
+  card.style.marginTop = '12px';
+  const h = document.createElement('h2'); h.style.fontSize = '13px'; h.textContent = 'Titres proposés';
+  card.appendChild(h);
+  (titres || []).forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'titre-row';
+    const txt = document.createElement('div'); txt.className = 'txt'; txt.textContent = t;
+    row.append(txt, copyBtn('Copier', t));
+    card.appendChild(row);
+  });
+  return card;
+}
+function renderSEOResult(data, chapitres, description){
+  const box = $('seoResult');
+  box.innerHTML = '';
+  box.appendChild(blocTitres(data.titres));
+  box.appendChild(champSEO('Description' + (chapitres.length ? ' (avec chapitres)' : ''), description));
+  box.appendChild(champSEO('Tags YouTube', (data.tags || []).join(', ')));
+  box.appendChild(champSEO('Hashtags réseaux sociaux', (data.hashtags || []).join(' ')));
+}
+
+$('btnSEO').onclick = async () => {
+  const status = $('seoStatus');
+  $('seoResult').innerHTML = '';
+  const key = $('geminiKey').value.trim();
+  if(!key){ status.innerHTML = '<span class="bad">Colle ta clé API Gemini (onglet 1, carte 3).</span>'; return; }
+  const paroles = $('paroles').value.trim();
+  if(!paroles){ status.innerHTML = '<span class="bad">Colle d\'abord les paroles (onglet 1).</span>'; return; }
+  try{ localStorage.setItem(GEMINI_KEY_STORE, key); localStorage.setItem(GEMINI_MODEL_STORE, $('geminiModel').value.trim()); }catch(e){}
+
+  status.innerHTML = 'Génération…';
+  $('btnSEO').disabled = true;
+  try{
+    const titre = $('titreMorceau').value.trim();
+    const contexte = $('seoContexte').value.trim();
+    const prompt = `Tu écris le pack de publication YouTube/réseaux sociaux pour une chanson Pixel Papa.
+
+Titre du morceau : ${titre || "(non précisé)"}
+Contexte / univers : ${contexte || "(non précisé)"}
+
+Paroles complètes :
+${paroles}
+
+Écris :
+- "titres" : 3 propositions de titre de vidéo YouTube (accrocheurs, en français, sans emoji excessif).
+- "description_intro" : 2 à 3 phrases d'intro pour la description YouTube (donne envie, ne récite pas les paroles).
+- "description_outro" : 2 à 3 phrases de fin de description (appel à l'action générique — s'abonner, découvrir d'autres morceaux — n'invente aucun lien ni plateforme précise).
+- "tags" : 12 à 15 tags YouTube pertinents (mots-clés courts, sans #).
+- "hashtags" : 8 à 10 hashtags courts pour la légende TikTok/Instagram (avec #, sans espace).
+
+Ne mentionne AUCUN horodatage ni minutage : les chapitres sont ajoutés séparément par l'application, à partir du calage réel.`;
+
+    const data = await callGeminiChain([{ text: prompt }], SEO_SCHEMA);
+
+    const chapitres = buildChapitresYouTube();
+    let description = (data.description_intro || "").trim();
+    if(chapitres.length){
+      description += "\n\n" + chapitres.map(c => fmtChapTime(c.t) + " " + c.label).join("\n");
+    }
+    description += "\n\n" + (data.description_outro || "").trim();
+
+    renderSEOResult(data, chapitres, description.trim());
+    status.innerHTML = '<span class="ok">Pack généré.</span>'
+      + (chapitres.length ? '' : ' <span class="warn">Chapitres non inclus — il faut au moins 3 balises [Refrain]/[Couplet] avec des lignes calées, espacées d\'au moins 10s.</span>');
+  }catch(err){
+    status.innerHTML = `<span class="bad">Échec : ${escHtml(err.message || String(err))}</span>`;
+  }finally{
+    $('btnSEO').disabled = false;
+  }
+};
+
+/* ═══════════════════ 13. HOOK / TEASER (onglet 6) ═══════════════════
+   1) Priorité aux balises de structure ([Refrain]/[Chorus]/[Hook]) : le
+      premier bloc marqué ainsi, entièrement calé, est le plus fiable.
+   2) À défaut, repli sur la détection d'un bloc de lignes consécutives qui
+      se répète mot pour mot ailleurs dans la chanson (signe classique d'un
+      refrain non balisé). */
+function detecterHookParBalise(){
+  const re = /refrain|chorus|hook/i;
+  const blocks = [];
+  let label = null, buf = [];
+  const flush = () => { if(buf.length) blocks.push({ label, lignes: buf }); buf = []; };
+  state.lines.forEach(l => {
+    if(l.type === 'section'){ flush(); label = l.text; }
+    else buf.push(l);
+  });
+  flush();
+  const bloc = blocks.find(b => re.test(b.label || "") && b.lignes.length && b.lignes.every(l => l.start != null && l.end != null));
+  return bloc ? { source: 'balise', label: bloc.label, lignes: bloc.lignes } : null;
+}
+function detecterHookParRepetition(){
+  const timed = state.lines.filter(l => l.type === 'line');
+  const norm = l => l.text.trim().toLowerCase();
+  for(let len = Math.min(6, timed.length); len >= 2; len--){
+    for(let i = 0; i + len <= timed.length; i++){
+      const bloc = timed.slice(i, i+len);
+      if(!bloc.every(l => l.start != null && l.end != null)) continue;
+      const sig = bloc.map(norm).join('|');
+      for(let j = i+len; j + len <= timed.length; j++){
+        const autre = timed.slice(j, j+len).map(norm).join('|');
+        if(autre === sig) return { source: 'répétition', label: null, lignes: bloc };
+      }
+    }
+  }
+  return null;
+}
+function detecterHook(){
+  return detecterHookParBalise() || detecterHookParRepetition();
+}
+
+$('btnHook').onclick = () => {
+  const status = $('hookStatus'), box = $('hookResult');
+  box.innerHTML = '';
+  const timeable = state.lines.filter(l => l.type === 'line');
+  if(!timeable.length || timeable.some(l => l.start == null)){
+    status.innerHTML = '<span class="warn">Cale d\'abord toutes les lignes (onglet 1) — la détection a besoin des timecodes.</span>';
+    return;
+  }
+  const h = detecterHook();
+  if(!h){
+    status.innerHTML = '<span class="bad">Aucun refrain identifiable — ni balise [Refrain]/[Chorus]/[Hook], ni lignes répétées à l\'identique.</span>';
+    return;
+  }
+  const preRoll = 0.3, postRoll = 0.3;
+  const dur = player.duration || Infinity;
+  const start = Math.max(0, h.lignes[0].start - preRoll);
+  const end = Math.min(dur, h.lignes[h.lignes.length-1].end + postRoll);
+
+  status.innerHTML = `<span class="ok">Trouvé via ${h.source === 'balise' ? 'la balise ' + escHtml(h.label) : 'une répétition de lignes'}.</span>`;
+
+  const card = document.createElement('div');
+  card.className = 'card nested';
+  card.style.marginTop = '10px';
+  const texte = document.createElement('p');
+  texte.style.cssText = 'white-space:pre-line;margin:0 0 8px';
+  texte.textContent = h.lignes.map(l => l.text).join('\n');
+  const info = document.createElement('p');
+  info.className = 'hint';
+  info.textContent = `De ${fmtShort(start)} à ${fmtShort(end)} — ${(end-start).toFixed(1)}s`;
+  const btns = document.createElement('div'); btns.className = 'exportbtns';
+  const btnPrev = document.createElement('button'); btnPrev.className = 'small'; btnPrev.textContent = '▶ Prévisualiser';
+  btnPrev.onclick = () => { player.currentTime = start; state.previewEnd = end; player.play(); };
+  const btnCopy = copyBtn('Copier les timecodes', `${fmtShort(start)} → ${fmtShort(end)} (${(end-start).toFixed(1)}s)`);
+  btns.append(btnPrev, btnCopy);
+  card.append(texte, info, btns);
+  box.appendChild(card);
 };
 
 /* ═══════════════════ INIT ═══════════════════ */
