@@ -1108,16 +1108,37 @@ function jsonRepare(raw){
   return null;
 }
 
+/* Aucun des appels à Gemini n'avait de délai maximum : un réseau qui
+   traîne, une requête silencieusement bloquée (pare-feu, bloqueur de
+   pub, VPN) laissait le bouton indéfiniment sur "Génération…" sans
+   jamais afficher d'erreur — retour de terrain exact ("reste sur
+   génération sans rien sortir"). Toute requête vers Gemini passe
+   maintenant par ce délai plutôt que par un fetch() nu. */
+async function fetchAvecDelai(url, options, delaiMs){
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), delaiMs);
+  try{
+    return await fetch(url, { ...options, signal: controller.signal });
+  }catch(err){
+    if(err.name === 'AbortError'){
+      throw new Error(`Délai dépassé (${Math.round(delaiMs/1000)}s) — connexion trop lente, ou requête bloquée (pare-feu, bloqueur de pub, VPN, extension de navigateur).`);
+    }
+    throw err;
+  }finally{
+    clearTimeout(id);
+  }
+}
+
 async function callGemini(model, parts, schema){
   const key = $('geminiKey').value.trim();
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  const res = await fetchAvecDelai(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
       generationConfig: { responseMimeType: "application/json", responseSchema: schema }
     })
-  });
+  }, 30000);
   if(!res.ok){
     let d = ""; try{ d = (await res.json()).error?.message || ""; }catch(e){}
     throw new Error("HTTP " + res.status + (d ? " — " + d : ""));
@@ -1647,7 +1668,7 @@ async function modelesImageDisponibles(){
   if(imageModelsCache) return imageModelsCache;
   const key = $('geminiKey').value.trim();
   try{
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`, { headers: { "x-goog-api-key": key } });
+    const res = await fetchAvecDelai(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`, { headers: { "x-goog-api-key": key } }, 10000);
     if(!res.ok) throw new Error("liste indisponible");
     const d = await res.json();
     const dispo = (d.models || [])
@@ -1668,11 +1689,11 @@ async function callGeminiImageOnce(model, requestParts, avecModalites){
   // pour renvoyer une image, d'autres le refusent en 400 : on tente les
   // deux formes plutôt que de deviner.
   if(avecModalites) body.generationConfig = { responseModalities: ["TEXT", "IMAGE"] };
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  const res = await fetchAvecDelai(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify(body)
-  });
+  }, 45000);
   if(!res.ok){
     let d = ""; try{ d = (await res.json()).error?.message || ""; }catch(e){}
     throw new Error("HTTP " + res.status + (d ? " — " + d : ""));
