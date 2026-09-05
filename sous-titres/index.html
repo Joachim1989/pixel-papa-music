@@ -1137,12 +1137,23 @@ async function fetchAvecDelai(url, options, delaiMs){
 
 async function callGemini(model, parts, schema){
   const key = $('geminiKey').value.trim();
+  // Cause réelle du blocage à 30s pile (confirmé par le diagnostic : la simple
+  // liste de modèles répond en <1s, seule la génération traîne) : les modèles
+  // Gemini 3 réfléchissent par défaut avant de répondre, et ces jetons de
+  // réflexion ne sont PAS gratuits en temps — jusqu'à 30-50s d'attente pour
+  // un texte qui n'en a pas besoin. Même correctif que l'appli Insert Coin
+  // dont cet outil est issu (voir buildBody() dans src/api/gemini.js) :
+  // thinkingLevel "low" sur Gemini 3 (thinkingBudget est refusé, 400, sur
+  // cette famille), thinkingBudget:0 sur les autres.
+  const g3 = /^gemini-3/.test(model || "");
+  const generationConfig = { responseMimeType: "application/json", responseSchema: schema };
+  generationConfig.thinkingConfig = g3 ? { thinkingLevel: "low" } : { thinkingBudget: 0 };
   const res = await fetchAvecDelai(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify({
       contents: [{ role: "user", parts }],
-      generationConfig: { responseMimeType: "application/json", responseSchema: schema }
+      generationConfig
     })
   }, 30000);
   if(!res.ok){
