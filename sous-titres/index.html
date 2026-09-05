@@ -136,6 +136,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px
   <button class="tab" data-tab="seo">5. Pack SEO / pub</button>
   <button class="tab" data-tab="hook">6. Hook / teaser</button>
   <button class="tab" data-tab="visuels">7. Visuels</button>
+  <button class="tab" data-tab="apercu">8. Aperçu</button>
 </nav>
 
 <!-- ═══════════════════ ONGLET 1 : CALAGE (paroles, audio, tap-to-sync) ═══════════════════ -->
@@ -356,6 +357,16 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
     <h2>Fiche de style Pixel Papa</h2>
     <p class="hint">Réutilisée dans chaque image générée ci-dessous, pour rester cohérent visuellement d'un morceau à l'autre. Remplie automatiquement si tu analyses une image de référence ci-dessus — sinon modifiable librement.</p>
     <textarea id="ficheStyle" style="min-height:130px">Pixel art rétro-gaming façon borne d'arcade des années 80-90 : contours noirs épais, ombrage par aplats/blocs nets (pas de dégradé photoréaliste). Palette dominante noir + or/ambre chaud, avec touches turquoise/cyan en accent (contours, reflets, éclats). Ambiance chaleureuse et espiègle, iconographie arcade (manettes, joysticks, croix directionnelles, pièces, étincelles).</textarea>
+    <label for="formatImage" style="margin-top:10px">Format des images générées</label>
+    <select id="formatImage">
+      <option value="16:9" selected>16:9 paysage (YouTube, montage classique)</option>
+      <option value="9:16">9:16 portrait (Shorts / Reels / TikTok)</option>
+      <option value="1:1">1:1 carré (Instagram feed)</option>
+    </select>
+    <label for="continuiteStoryboard" style="margin-top:10px;display:flex;align-items:center;gap:6px">
+      <input type="checkbox" id="continuiteStoryboard" checked style="width:auto">
+      Storyboard : caler chaque scène sur la précédente (personnage plus cohérent d'une scène à l'autre)
+    </label>
   </div>
 
   <div class="card" style="max-width:640px">
@@ -375,6 +386,19 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
   </div>
 </section>
 
+<!-- ═══════════════════ ONGLET 8 : APERÇU ANIMÉ (previz, dans le navigateur) ═══════════════════ -->
+<section id="tab-apercu" class="tabpanel">
+  <div class="card" style="max-width:640px">
+    <h2>Aperçu animé (previz)</h2>
+    <p class="hint">Prévisualisation approximative, directement dans le navigateur, à partir des images du storyboard déjà générées (onglet 7) — pour valider le rythme et l'enchaînement avant de monter pour de vrai dans CapCut/VN/Canva. Ce n'est pas un export vidéo, juste un aperçu : lance la lecture depuis l'onglet 1, reviens ici pour regarder.</p>
+    <div id="apercuBox" style="position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:var(--bg);aspect-ratio:16/9">
+      <img id="apercuImg" style="width:100%;height:100%;object-fit:cover;display:none">
+      <div id="apercuVide" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px;color:var(--text-muted);font-size:13px">Génère le storyboard (onglet 7) pour voir les scènes défiler ici pendant la lecture.</div>
+      <div id="apercuSousTitre" style="position:absolute;left:0;right:0;bottom:0;padding:14px;text-align:center;font-family:var(--cond);font-weight:700;font-size:20px;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.8);background:linear-gradient(transparent,rgba(0,0,0,.55))"></div>
+    </div>
+  </div>
+</section>
+
 <script>
 "use strict";
 
@@ -387,7 +411,9 @@ const state = {
   selectedIndex: -1,
   audioLoaded: false,
   previewEnd: null, // fin de la prévisualisation "hook" en cours (voir onglet 6)
-  playingIndex: -1 // ligne actuellement chantée d'après le calage existant (suivi de lecture)
+  playingIndex: -1, // ligne actuellement chantée d'après le calage existant (suivi de lecture)
+  previewSectionIndex: -1, // section actuellement en cours, pour l'aperçu animé (onglet 8)
+  storyboard: [] // [{label, dataUrl}] dans l'ordre des sections, rempli par "Générer le storyboard"
 };
 
 const $ = id => document.getElementById(id);
@@ -401,6 +427,7 @@ document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => {
   document.querySelectorAll('.tabpanel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   $('tab-' + btn.dataset.tab).classList.add('active');
+  if(btn.dataset.tab === 'apercu') updateApercu();
 });
 
 /* ═══════════════════ PERSISTANCE (brouillon local) ═══════════════════
@@ -516,11 +543,18 @@ player.addEventListener('timeupdate', () => {
   // inerte pendant un calage encore en cours, tant que la ligne n'est pas
   // tapée.
   const pi = indexEnCours(player.currentTime);
+  let besoinApercu = false;
   if(pi !== state.playingIndex){
     state.playingIndex = pi;
     updatePrompteur();
     appliquerSurbrillanceLecture();
+    besoinApercu = true; // le sous-titre affiché dans l'aperçu (onglet 8) suit aussi playingIndex
   }
+  // Aperçu animé (onglet 8) : quelle scène du storyboard correspond à l'instant
+  // courant — indépendant de pi ci-dessus, une section dure plusieurs lignes.
+  const si = indexSectionEnCours(player.currentTime);
+  if(si !== state.previewSectionIndex){ state.previewSectionIndex = si; besoinApercu = true; }
+  if(besoinApercu) updateApercu();
 });
 player.addEventListener('loadedmetadata', () => { paintTicks(); render(); });
 /* Démarrer la lecture relâche le focus d'un champ de texte (paroles, titre...)
@@ -1333,11 +1367,24 @@ Réponds en 5 à 8 phrases denses, en français, directement utilisables comme f
 /* Construit les parts envoyées à la génération d'image : le texte du
    prompt, précédé de l'image de référence si elle est chargée ET que la
    case "référence directe" est cochée. */
-function buildImageParts(promptTexte){
+const FORMAT_LABELS = { "16:9": "paysage 16:9", "9:16": "portrait 9:16 (vertical)", "1:1": "carré 1:1" };
+function formatChoisi(){
+  const v = $('formatImage').value;
+  return FORMAT_LABELS[v] || FORMAT_LABELS["16:9"];
+}
+
+/* references additionnelles : { mime, data } — l'image uploadée (si "référence
+   directe" cochée) et/ou la scène précédente du storyboard (si "caler sur la
+   précédente" coché), pour la cohérence de personnage d'une image à l'autre. */
+function buildImageParts(promptTexte, referencesSupp){
   const parts = [];
+  (referencesSupp || []).forEach(r => parts.push({ inlineData: { mimeType: r.mime, data: r.data } }));
   if(refState.base64 && $('refDirecte').checked){
     parts.push({ inlineData: { mimeType: refState.mime, data: refState.base64 } });
     promptTexte += "\n\nUne image de référence est fournie en entrée : reprends son style, et si elle montre un personnage, fais-le réapparaître à l'identique (même apparence, même tenue, mêmes couleurs).";
+  }
+  if((referencesSupp || []).length){
+    promptTexte += "\n\nUne autre image fournie est la SCÈNE PRÉCÉDENTE du même storyboard : garde le même personnage et le même style, seul le décor/l'action changent.";
   }
   parts.push({ text: promptTexte });
   return parts;
@@ -1349,12 +1396,12 @@ function promptVisuelSection(label, lignes, styleSheet){
 Illustre une scène pour la section "${label}" d'une chanson Pixel Papa, dans ce style, à partir de l'ambiance suggérée par ces paroles (illustre l'AMBIANCE et les images évoquées, ne reproduis AUCUN texte ni lettre dans l'image) :
 ${lignes.map(l => l.text).join('\n')}
 
-Format paysage 16:9, une seule scène cohérente, sans texte ni lettres visibles dans l'image.`;
+Format ${formatChoisi()}, une seule scène cohérente, sans texte ni lettres visibles dans l'image.`;
 }
 function promptVignette(titre, contexte, styleSheet){
   return `${styleSheet}
 
-Crée une vignette YouTube accrocheuse pour la chanson "${titre || 'Pixel Papa'}"${contexte ? ' — contexte : ' + contexte : ''}, dans ce style. Composition impactante et lisible même en petit format, un sujet central clair, fort contraste. Format paysage 16:9. Pas de texte ni de lettres dans l'image (le titre sera ajouté séparément par-dessus).`;
+Crée une vignette YouTube accrocheuse pour la chanson "${titre || 'Pixel Papa'}"${contexte ? ' — contexte : ' + contexte : ''}, dans ce style. Composition impactante et lisible même en petit format, un sujet central clair, fort contraste. Format ${formatChoisi()}. Pas de texte ni de lettres dans l'image (le titre sera ajouté séparément par-dessus).`;
 }
 
 function downloadDataUrl(filename, dataUrl){
@@ -1362,7 +1409,10 @@ function downloadDataUrl(filename, dataUrl){
   a.href = dataUrl; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
 }
-function blocImage(titre, promptTexte, img){
+/* onRegenerate(nouvelleDataUrl) : callback optionnel appelé après une
+   régénération réussie — sert au storyboard pour garder state.storyboard
+   synchronisé avec ce qui est réellement affiché (voir plus bas). */
+function blocImage(titre, promptTexte, img, onRegenerate){
   const card = document.createElement('div');
   card.className = 'card nested';
   card.style.marginTop = '10px';
@@ -1371,15 +1421,35 @@ function blocImage(titre, promptTexte, img){
   imageEl.src = `data:${img.mime};base64,${img.data}`;
   imageEl.alt = titre;
   imageEl.style.cssText = 'width:100%;border-radius:8px;border:1px solid var(--border);margin-top:6px;display:block';
+  const statut = document.createElement('p'); statut.className = 'hint'; statut.style.margin = '4px 0 0';
+  statut.textContent = `Généré via ${img.model}.`;
+
+  const details = document.createElement('details');
+  const summary = document.createElement('summary'); summary.textContent = 'Voir / modifier le prompt';
+  const pre = document.createElement('textarea'); pre.style.minHeight = '90px'; pre.value = promptTexte;
+  details.append(summary, pre);
+
   const btns = document.createElement('div'); btns.className = 'exportbtns';
   const btnDl = document.createElement('button'); btnDl.className = 'small'; btnDl.textContent = 'Télécharger';
   btnDl.onclick = () => downloadDataUrl(titre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.png', imageEl.src);
-  btns.appendChild(btnDl);
-  const details = document.createElement('details');
-  const summary = document.createElement('summary'); summary.textContent = `Voir le prompt utilisé (généré via ${img.model})`;
-  const pre = document.createElement('textarea'); pre.readOnly = true; pre.style.minHeight = '90px'; pre.value = promptTexte;
-  details.append(summary, pre);
-  card.append(h, imageEl, btns, details);
+  const btnRegen = document.createElement('button'); btnRegen.className = 'small primary'; btnRegen.textContent = '🔁 Régénérer';
+  btnRegen.onclick = async () => {
+    btnRegen.disabled = true; btnRegen.textContent = 'Génération…';
+    try{
+      const nouveauPrompt = pre.value.trim();
+      const nouvelleImg = await callGeminiImageChain(buildImageParts(nouveauPrompt));
+      imageEl.src = `data:${nouvelleImg.mime};base64,${nouvelleImg.data}`;
+      statut.textContent = `Généré via ${nouvelleImg.model}.`;
+      if(onRegenerate) onRegenerate(imageEl.src);
+    }catch(err){
+      alert('Échec de la régénération : ' + (err.message || String(err)));
+    }finally{
+      btnRegen.disabled = false; btnRegen.textContent = '🔁 Régénérer';
+    }
+  };
+  btns.append(btnDl, btnRegen);
+
+  card.append(h, imageEl, statut, btns, details);
   return card;
 }
 
@@ -1391,7 +1461,7 @@ $('btnVignette').onclick = async () => {
   $('btnVignette').disabled = true;
   try{
     const prompt = promptVignette($('titreMorceau').value.trim(), $('seoContexte').value.trim(), $('ficheStyle').value.trim());
-    const img = await callGeminiImageChain(buildImageParts(prompt));
+    const img = await callGeminiImageChain(buildImageParts(prompt, []));
     box.appendChild(blocImage('Vignette YouTube', prompt, img));
     status.innerHTML = '<span class="ok">Image générée.</span>';
   }catch(err){
@@ -1415,14 +1485,26 @@ $('btnStoryboard').onclick = async () => {
   box.innerHTML = '';
   $('btnStoryboard').disabled = true;
   const style = $('ficheStyle').value.trim();
-  let ok = 0;
-  for(const bloc of blocs){
+  const continuite = $('continuiteStoryboard').checked;
+  state.storyboard = new Array(blocs.length).fill(null);
+  let ok = 0, precedente = null;
+  for(let k = 0; k < blocs.length; k++){
+    const bloc = blocs[k], idx = k;
     const nom = bloc.label || 'Intro';
     status.innerHTML = `Génération "${escHtml(nom)}"… (${ok}/${blocs.length})`;
     try{
       const prompt = promptVisuelSection(nom, bloc.lignes, style);
-      const img = await callGeminiImageChain(buildImageParts(prompt));
-      box.appendChild(blocImage(nom, prompt, img));
+      // Cohérence de personnage : la scène précédente sert aussi de référence
+      // à celle-ci, en plus de l'image uploadée éventuelle (voir case à cocher).
+      const refsSupp = (continuite && precedente) ? [precedente] : [];
+      const img = await callGeminiImageChain(buildImageParts(prompt, refsSupp));
+      const dataUrl = `data:${img.mime};base64,${img.data}`;
+      state.storyboard[idx] = { label: nom, dataUrl };
+      box.appendChild(blocImage(nom, prompt, img, (nouvelleDataUrl) => {
+        state.storyboard[idx] = { label: nom, dataUrl: nouvelleDataUrl };
+        updateApercu();
+      }));
+      precedente = { mime: img.mime, data: img.data };
       ok++;
     }catch(err){
       const card = document.createElement('div');
@@ -1436,11 +1518,39 @@ $('btnStoryboard').onclick = async () => {
   }
   status.innerHTML = `<span class="ok">${ok}/${blocs.length} image(s) générée(s).</span>`;
   $('btnStoryboard').disabled = false;
+  updateApercu();
 };
+
+/* ═══════════════════ 15. APERÇU ANIMÉ (onglet 8) ═══════════════════
+   Prévisualisation client uniquement (aucun export vidéo réel — hors de
+   portée d'une simple page statique) : affiche l'image du storyboard qui
+   correspond à la section en cours de lecture, avec la ligne en cours en
+   sous-titre par-dessus. Réutilise sectionMarkers() (mêmes blocs que le
+   storyboard et le pack SEO) pour rester aligné sans nouvelle logique de
+   découpage. */
+function indexSectionEnCours(t){
+  const marks = sectionMarkers();
+  for(let k = 0; k < marks.length; k++){
+    const debut = marks[k].t;
+    const fin = k + 1 < marks.length ? marks[k+1].t : Infinity;
+    if(t >= debut && t < fin) return k;
+  }
+  return -1;
+}
+function updateApercu(){
+  const img = $('apercuImg'), vide = $('apercuVide'), sub = $('apercuSousTitre');
+  if(!img) return;
+  const item = state.previewSectionIndex >= 0 ? state.storyboard[state.previewSectionIndex] : null;
+  img.style.display = item ? 'block' : 'none';
+  vide.style.display = item ? 'none' : 'flex';
+  if(item) img.src = item.dataUrl;
+  sub.textContent = state.playingIndex >= 0 ? state.lines[state.playingIndex].text : '';
+}
 
 /* ═══════════════════ INIT ═══════════════════ */
 draftLoad();
 render();
+updateApercu();
 </script>
 </body>
 </html>
