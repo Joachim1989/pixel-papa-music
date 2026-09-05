@@ -155,8 +155,47 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px
      vérifications avant de générer dans Suno. -->
 <section id="tab-ecriture" class="tabpanel active">
   <div class="card" style="max-width:640px">
-    <h2>0. Écriture (avant Suno)</h2>
-    <p class="hint">L'écriture elle-même (angles, paroles, bloc Style/Lyrics/Title) se fait mieux en conversation avec Claude — demande le skill <code>pixel-papa-suno</code>, qui propose des angles puis vérifie rimes, minutage et prononciation avant de livrer. Un bouton "générer" ici sauterait ces vérifications et livrerait un texte moins abouti. Cet onglet sert juste à récupérer ce qui a été écrit et enchaîner sans re-taper.</p>
+    <h2>Générer un premier jet (optionnel)</h2>
+    <p class="hint">Automatise un premier jet à partir de quelques choix — plus rapide qu'écrire avec Claude en conversation, mais aussi moins abouti : pas de choix d'angle, pas d'allers-retours de contrôle qualité. Utile pour démarrer vite ou débloquer une page blanche ; relis et corrige avant de coller dans Suno (checklist plus bas).</p>
+
+    <label for="genTheme">Thématique / univers</label>
+    <input type="text" id="genTheme" style="width:100%" placeholder="ex. la paternité vue à travers un jeu vidéo, un souvenir d'enfance...">
+
+    <label for="genMessage" style="margin-top:10px">Message / thèse (ce que le morceau affirme, pas ce qu'il raconte)</label>
+    <input type="text" id="genMessage" style="width:100%" placeholder="ex. être présent en actes même quand l'esprit vagabonde">
+
+    <div class="row" style="margin-top:10px">
+      <div>
+        <label for="genLongueur">Longueur cible</label>
+        <select id="genLongueur">
+          <option value="2m30">~2m30 (deux couplets)</option>
+          <option value="3m30" selected>~3m30-3m50 (trois couplets — recommandé)</option>
+          <option value="4m00">~4m00 (trois couplets + pre-chorus)</option>
+        </select>
+      </div>
+      <div>
+        <label for="genStyle">Style / registre</label>
+        <select id="genStyle">
+          <option value="piano" selected>Piano introspectif (défaut Pixel Papa)</option>
+          <option value="epique">Épique sombre</option>
+          <option value="retro">Retrogaming</option>
+          <option value="leger">Léger / familial</option>
+          <option value="autre">Autre (précise ci-dessous)</option>
+        </select>
+      </div>
+    </div>
+
+    <label for="genPrompt" style="margin-top:10px">Instructions supplémentaires (optionnel)</label>
+    <textarea id="genPrompt" style="min-height:70px" placeholder="Tout ce qui compte pour ce morceau : références à utiliser, ambiance précise, un refrain déjà en tête, des messages spécifiques..."></textarea>
+
+    <div class="row" style="margin-top:8px"><button id="btnGenererTexte" class="primary">Générer le premier jet</button></div>
+    <div class="status" id="genStatus"></div>
+    <div id="genResult"></div>
+  </div>
+
+  <div class="card" style="max-width:640px">
+    <h2>Titre + paroles</h2>
+    <p class="hint">Le résultat généré ci-dessus arrive ici après "Utiliser ce texte" — ou colle directement ce que tu as écrit avec Claude en conversation (souvent plus abouti : angles proposés, rimes et minutage vérifiés).</p>
     <label for="ecritureTitre">Titre (du bloc Suno)</label>
     <input type="text" id="ecritureTitre" style="width:100%">
     <label for="ecritureParoles" style="margin-top:10px">Paroles (colle le champ Lyrics écrit avec Claude)</label>
@@ -476,7 +515,7 @@ document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => {
    au chargement (initGuides) plutôt que dupliqué dans le HTML de chacun
    des 9 panneaux — un texte à corriger une fois, pas neuf fois. */
 const GUIDE_ETAPES = [
-  { id:'ecriture', titre:'Écriture', pourquoi:"c'est le point de départ : le titre et les paroles de la chanson, avant même d'aller sur Suno.", comment:"écris avec Claude en conversation (il propose des angles, vérifie les rimes et le minutage), colle le résultat ci-dessous, puis clique pour l'envoyer à l'étape suivante." },
+  { id:'ecriture', titre:'Écriture', pourquoi:"c'est le point de départ : le titre et les paroles de la chanson, avant même d'aller sur Suno.", comment:"deux façons de faire : génère un premier jet ici même (thème, longueur, style — rapide mais à corriger), ou écris avec Claude en conversation (plus abouti : angles proposés, rimes et minutage vérifiés). Envoie ensuite vers Calage." },
   { id:'calage', titre:'Calage', pourquoi:"chaque ligne doit être associée au moment exact où elle est chantée — sans ça, impossible de faire des sous-titres, un karaoké ou des visuels qui suivent la musique.", comment:"charge l'audio, écoute, et appuie sur Entrée à chaque ligne (ou laisse l'IA dégrossir le travail, à corriger ensuite à l'oreille)." },
   { id:'soustitres', titre:'Sous-titres', pourquoi:"pour que les spectateurs puissent lire les paroles en même temps qu'ils écoutent, sur YouTube ou les réseaux.", comment:"une fois le calage terminé (onglet précédent), télécharge le fichier .srt ou .vtt et importe-le dans ton logiciel de montage." },
   { id:'karaoke', titre:'Karaoké', pourquoi:"pour un effet visuel où le texte se surligne en rythme — utile pour les vidéos où les paroles doivent « vivre » à l'écran.", comment:"choisis le mode (ligne entière ou mot par mot), télécharge le fichier .ass, importe-le comme les sous-titres." },
@@ -561,6 +600,110 @@ const CHECKLIST_SUNO = [
     box.appendChild(label);
   });
 })();
+
+/* ═══════════════════ GÉNÉRATEUR DE PREMIER JET (onglet 0) ═══════════════════
+   Porte AUTANT QUE POSSIBLE la charte du skill pixel-papa-suno (structure en
+   bars par durée, dix règles d'écriture, format Suno Style/Lyrics/Title,
+   contraintes de prononciation française) dans un prompt Gemini — mais reste
+   un aller simple, sans le choix d'angle ni les allers-retours de contrôle
+   qualité du skill conversationnel. D'où le bouton "Utiliser ce texte" plutôt
+   qu'un envoi automatique : on relit avant de s'engager. */
+const GENERATION_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    titre: { type: "STRING" },
+    style_field: { type: "STRING" },
+    lyrics_field: { type: "STRING" },
+    notes: { type: "STRING" }
+  }
+};
+const STRUCTURES_LONGUEUR = {
+  "2m30": "Structure : Intro 4 + Couplet 16 + Refrain 8 + Couplet 16 + Refrain 8 + Outro 4 (~55 bars). Volontairement DEUX couplets seulement pour cette durée — ne pas en ajouter un troisième.",
+  "3m30": "Structure : Intro 4 + Couplet 1 (16 bars) + Refrain 8 + Couplet 2 (16 bars) + Refrain 8 + Pont 8 + Couplet 3 (12 à 16 bars) + Refrain 8 + Outro 4 (~75-85 bars au total). TROIS couplets complets, c'est le format standard — ne jamais réduire à deux (l'erreur la plus fréquente).",
+  "4m00": "Comme la structure 3m30-3m50, avec un Pre-Chorus de 4 bars ajouté avant CHAQUE refrain (~86 bars). TROIS couplets complets."
+};
+const PRESETS_STYLE_GEN = {
+  piano: "melancholic French rap, mid-tempo, sparse grand piano lead, warm male vocals, intimate conversational flow, warm analog recording, introspective",
+  epique: "dark cinematic French rap, orchestral strings and low choir, heavy 808 drums, commanding male vocals, dramatic and menacing",
+  retro: "retro chiptune hip-hop, 8-bit synth leads, boom bap drums, French male vocals, nostalgic and playful, lo-fi warmth",
+  leger: "retro chiptune hip-hop, sung melodic chorus, airy layered backing vocals, French male vocals, nostalgic and playful, lo-fi warmth",
+  autre: ""
+};
+
+function promptGenerationTexte(){
+  const theme = $('genTheme').value.trim();
+  const message = $('genMessage').value.trim();
+  const longueur = $('genLongueur').value;
+  const presetStyle = PRESETS_STYLE_GEN[$('genStyle').value];
+  const instructions = $('genPrompt').value.trim();
+
+  return `Tu écris un premier jet de chanson pour Pixel Papa : rap français introspectif, piano au premier plan par défaut, métaphorique plutôt que frontal, dense en références geek/cinéma/mythologie/psychologie, épuré mais jamais court.
+
+RÈGLES D'ÉCRITURE (non négociables) :
+1. Phrases courtes, sujet-verbe-image — la punchline meurt dans la subordonnée.
+2. Rimes riches : au moins 3 sons partagés sur les chutes.
+3. Une seule référence par bar maximum, TOUJOURS en métaphore (jamais en name-drop brut), et JAMAIS un nom d'artiste réel — traduis toute inspiration en descripteurs.
+4. Une seule métaphore filée sur tout le morceau : elle s'ouvre au couplet 1, se fissure au 2, se retourne au 3.
+5. Concret plutôt qu'abstrait — un objet, une heure, un bruit précis, pas un concept.
+6. Le refrain est une phrase-titre de 4 à 8 lignes, texte STRICTEMENT identique à chaque reprise.
+7. Le couplet 3 ramène la métaphore/le mythe à la vraie vie de l'auteur. Toujours.
+8. Pas de morale finale : l'outro laisse la question ouverte.
+9. Jamais l'angle "père absent" frontal — la nuance juste est "absent en pensée, présent en actes".
+10. Vérifie mentalement que chaque ligne se dit d'un souffle.
+
+${STRUCTURES_LONGUEUR[longueur]}
+
+THÉMATIQUE : ${theme || "(libre — propose quelque chose dans l'esprit Pixel Papa)"}
+MESSAGE / THÈSE : ${message || "(à déduire de la thématique)"}
+${instructions ? "INSTRUCTIONS SUPPLÉMENTAIRES : " + instructions : ""}
+
+FORMAT DE LIVRAISON (obligatoire, JSON) :
+- "titre" : le titre du morceau.
+- "style_field" : le champ Style Suno — 4 à 7 descripteurs EN ANGLAIS séparés par des virgules, genre principal en premier, AUCUN nom d'artiste réel.${presetStyle ? ` Pars de cette base et adapte-la légèrement au thème : "${presetStyle}".` : " Choisis des descripteurs cohérents avec le thème et la charte ci-dessus."}
+- "lyrics_field" : le champ Lyrics Suno — paroles en FRANÇAIS, avec des metatags de structure EN ANGLAIS entre crochets (ex. [Verse 1: sparse piano, brushed drums], [Chorus: full arrangement, sung melodic vocals], [Bridge], [Outro]), respectant la structure demandée plus haut. Écris les chiffres en toutes lettres et les sigles séparés par des tirets (ex. "P-S-deux", pas "PS2"). Termine OBLIGATOIREMENT par la ligne [End].
+- "notes" : 2 à 3 phrases de rappel — points à vérifier avant de coller dans Suno (réglages de sliders, prononciation à tester...).
+
+Ne mentionne aucun nom d'artiste réel, nulle part dans la réponse.`;
+}
+
+function renderGenResult(data){
+  const box = $('genResult');
+  box.innerHTML = '';
+  box.appendChild(champSEO('Titre', data.titre || ''));
+  box.appendChild(champSEO('Style (à coller dans Suno)', data.style_field || ''));
+  box.appendChild(champSEO('Lyrics (à coller dans Suno)', data.lyrics_field || ''));
+  if(data.notes) box.appendChild(champSEO('À vérifier avant Suno', data.notes));
+
+  const btnUtiliser = document.createElement('button');
+  btnUtiliser.className = 'primary';
+  btnUtiliser.style.marginTop = '10px';
+  btnUtiliser.textContent = 'Utiliser ce texte ↓ (remplit Titre + Paroles ci-dessous)';
+  btnUtiliser.onclick = () => {
+    $('ecritureTitre').value = data.titre || '';
+    $('ecritureParoles').value = data.lyrics_field || '';
+    draftSave();
+    btnUtiliser.textContent = 'Utilisé ✓ — modifie ci-dessous si besoin';
+    btnUtiliser.disabled = true;
+  };
+  box.appendChild(btnUtiliser);
+}
+
+$('btnGenererTexte').onclick = async () => {
+  const status = $('genStatus');
+  const key = $('geminiKey').value.trim();
+  if(!key){ status.innerHTML = '<span class="bad">Colle ta clé API Gemini (onglet 1, carte 3).</span>'; return; }
+  status.innerHTML = 'Génération…'; $('genResult').innerHTML = '';
+  $('btnGenererTexte').disabled = true;
+  try{
+    const data = await callGeminiChain([{ text: promptGenerationTexte() }], GENERATION_SCHEMA);
+    renderGenResult(data);
+    status.innerHTML = '<span class="ok">Premier jet généré.</span> Relis-le et corrige avant Suno — c\'est un aller simple, sans le contrôle qualité d\'une écriture en conversation.';
+  }catch(err){
+    status.innerHTML = `<span class="bad">Échec : ${escHtml(err.message || String(err))}</span>`;
+  }finally{
+    $('btnGenererTexte').disabled = false;
+  }
+};
 
 $('btnEnvoyerCalage').onclick = () => {
   const status = $('ecritureStatus');
