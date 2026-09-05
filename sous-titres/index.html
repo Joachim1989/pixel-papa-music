@@ -135,6 +135,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px
   <button class="tab" data-tab="animation">4. Repères animation</button>
   <button class="tab" data-tab="seo">5. Pack SEO / pub</button>
   <button class="tab" data-tab="hook">6. Hook / teaser</button>
+  <button class="tab" data-tab="visuels">7. Visuels</button>
 </nav>
 
 <!-- ═══════════════════ ONGLET 1 : CALAGE (paroles, audio, tap-to-sync) ═══════════════════ -->
@@ -332,6 +333,31 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
   </div>
 </section>
 
+<!-- ═══════════════════ ONGLET 7 : VISUELS (images générées) ═══════════════════ -->
+<section id="tab-visuels" class="tabpanel">
+  <div class="card" style="max-width:640px">
+    <h2>Fiche de style Pixel Papa</h2>
+    <p class="hint">Réutilisée dans chaque image générée ci-dessous, pour rester cohérent visuellement d'un morceau à l'autre. Modifiable.</p>
+    <textarea id="ficheStyle" style="min-height:130px">Pixel art rétro-gaming façon borne d'arcade des années 80-90 : contours noirs épais, ombrage par aplats/blocs nets (pas de dégradé photoréaliste). Palette dominante noir + or/ambre chaud, avec touches turquoise/cyan en accent (contours, reflets, éclats). Ambiance chaleureuse et espiègle, iconographie arcade (manettes, joysticks, croix directionnelles, pièces, étincelles).</textarea>
+  </div>
+
+  <div class="card" style="max-width:640px">
+    <h2>Vignette YouTube</h2>
+    <p class="hint">Réutilise le titre et le contexte de l'onglet 5 (Pack SEO). Format 16:9, sans texte incrusté (le titre s'ajoute à part).</p>
+    <div class="row"><button id="btnVignette" class="primary">Générer la vignette</button></div>
+    <div class="status" id="vignetteStatus"></div>
+    <div id="vignetteResult"></div>
+  </div>
+
+  <div class="card" style="max-width:640px">
+    <h2>Storyboard par section</h2>
+    <p class="hint">Une image par section détectée dans les paroles ([Couplet]/[Refrain]/[Pont]...) — pour poser les décors d'un montage animé sans partir de zéro. Génère les images une par une (peut prendre un moment sur une chanson à beaucoup de sections).</p>
+    <div class="row"><button id="btnStoryboard" class="primary">Générer le storyboard</button></div>
+    <div class="status" id="storyboardStatus"></div>
+    <div id="storyboardResult"></div>
+  </div>
+</section>
+
 <script>
 "use strict";
 
@@ -375,7 +401,8 @@ function draftSave(){
       paroles: $('paroles').value,
       lines: state.lines,
       titre: $('titreMorceau').value,
-      seoContexte: $('seoContexte').value
+      seoContexte: $('seoContexte').value,
+      ficheStyle: $('ficheStyle').value
     }));
   }catch(e){}
 }
@@ -386,6 +413,7 @@ function draftLoad(){
     if(d.paroles) $('paroles').value = d.paroles;
     if(d.titre) $('titreMorceau').value = d.titre;
     if(d.seoContexte) $('seoContexte').value = d.seoContexte;
+    if(d.ficheStyle) $('ficheStyle').value = d.ficheStyle;
     if(Array.isArray(d.lines) && d.lines.length){ state.lines = d.lines; state.selectedIndex = firstTimeableIndex(); }
   }catch(e){}
 }
@@ -397,6 +425,7 @@ try{
 }catch(e){}
 $('titreMorceau').addEventListener('input', draftSave);
 $('seoContexte').addEventListener('input', draftSave);
+$('ficheStyle').addEventListener('input', draftSave);
 
 /* ═══════════════════ 1. PAROLES → LIGNES ═══════════════════ */
 function parseParoles(raw){
@@ -1157,6 +1186,169 @@ $('btnHook').onclick = () => {
   btns.append(btnPrev, btnCopy);
   card.append(texte, info, btns);
   box.appendChild(card);
+};
+
+/* ═══════════════════ 14. VISUELS — génération d'images (onglet 7) ═══════════════════
+   Même clé Gemini que le reste de l'outil. Les modèles capables de
+   renvoyer une image changent de nom au fil du temps (comme les modèles
+   texte, voir GEMINI_FALLBACK plus haut) : on interroge donc la vraie
+   liste des modèles disponibles sur la clé, filtrée sur "image", avec un
+   repli sur quelques noms connus si l'appel de liste échoue — même
+   principe défensif que modelJoli()/MODELS_FALLBACK dans l'app Insert
+   Coin dont cet outil est issu. */
+const IMAGE_MODELS_FALLBACK = ["gemini-3-pro-image", "gemini-2.5-flash-image", "gemini-2.0-flash-preview-image-generation"];
+let imageModelsCache = null;
+
+async function modelesImageDisponibles(){
+  if(imageModelsCache) return imageModelsCache;
+  const key = $('geminiKey').value.trim();
+  try{
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`, { headers: { "x-goog-api-key": key } });
+    if(!res.ok) throw new Error("liste indisponible");
+    const d = await res.json();
+    const dispo = (d.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
+      .map(m => String(m.name || "").replace(/^models\//, ""))
+      .filter(n => /image/i.test(n));
+    imageModelsCache = dispo.length ? dispo : IMAGE_MODELS_FALLBACK.slice();
+  }catch(e){
+    imageModelsCache = IMAGE_MODELS_FALLBACK.slice();
+  }
+  return imageModelsCache;
+}
+
+async function callGeminiImageOnce(model, prompt, avecModalites){
+  const key = $('geminiKey').value.trim();
+  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+  // Certains modèles (générations "preview") exigent responseModalities
+  // pour renvoyer une image, d'autres le refusent en 400 : on tente les
+  // deux formes plutôt que de deviner.
+  if(avecModalites) body.generationConfig = { responseModalities: ["TEXT", "IMAGE"] };
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    let d = ""; try{ d = (await res.json()).error?.message || ""; }catch(e){}
+    throw new Error("HTTP " + res.status + (d ? " — " + d : ""));
+  }
+  const data = await res.json();
+  const cand = (data.candidates || [])[0];
+  if(!cand) throw new Error(data.promptFeedback?.blockReason || "Réponse vide");
+  const parts = (cand.content && cand.content.parts) || [];
+  const imgPart = parts.find(p => p.inlineData && /^image\//.test(p.inlineData.mimeType || ""));
+  if(!imgPart) throw new Error("Ce modèle n'a renvoyé aucune image.");
+  return { mime: imgPart.inlineData.mimeType, data: imgPart.inlineData.data };
+}
+
+async function callGeminiImageChain(prompt){
+  const modeles = await modelesImageDisponibles();
+  let lastErr = "";
+  for(const m of modeles){
+    for(const avecModalites of [true, false]){
+      try{
+        const img = await callGeminiImageOnce(m, prompt, avecModalites);
+        return { ...img, model: m };
+      }catch(err){ lastErr = err.message || String(err); }
+    }
+  }
+  throw new Error(lastErr || "Échec sur tous les modèles image disponibles sur cette clé.");
+}
+
+function promptVisuelSection(label, lignes, styleSheet){
+  return `${styleSheet}
+
+Illustre une scène pour la section "${label}" d'une chanson Pixel Papa, dans ce style, à partir de l'ambiance suggérée par ces paroles (illustre l'AMBIANCE et les images évoquées, ne reproduis AUCUN texte ni lettre dans l'image) :
+${lignes.map(l => l.text).join('\n')}
+
+Format paysage 16:9, une seule scène cohérente, sans texte ni lettres visibles dans l'image.`;
+}
+function promptVignette(titre, contexte, styleSheet){
+  return `${styleSheet}
+
+Crée une vignette YouTube accrocheuse pour la chanson "${titre || 'Pixel Papa'}"${contexte ? ' — contexte : ' + contexte : ''}, dans ce style. Composition impactante et lisible même en petit format, un sujet central clair, fort contraste. Format paysage 16:9. Pas de texte ni de lettres dans l'image (le titre sera ajouté séparément par-dessus).`;
+}
+
+function downloadDataUrl(filename, dataUrl){
+  const a = document.createElement('a');
+  a.href = dataUrl; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function blocImage(titre, promptTexte, img){
+  const card = document.createElement('div');
+  card.className = 'card nested';
+  card.style.marginTop = '10px';
+  const h = document.createElement('h2'); h.style.fontSize = '13px'; h.textContent = titre;
+  const imageEl = document.createElement('img');
+  imageEl.src = `data:${img.mime};base64,${img.data}`;
+  imageEl.alt = titre;
+  imageEl.style.cssText = 'width:100%;border-radius:8px;border:1px solid var(--border);margin-top:6px;display:block';
+  const btns = document.createElement('div'); btns.className = 'exportbtns';
+  const btnDl = document.createElement('button'); btnDl.className = 'small'; btnDl.textContent = 'Télécharger';
+  btnDl.onclick = () => downloadDataUrl(titre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.png', imageEl.src);
+  btns.appendChild(btnDl);
+  const details = document.createElement('details');
+  const summary = document.createElement('summary'); summary.textContent = `Voir le prompt utilisé (généré via ${img.model})`;
+  const pre = document.createElement('textarea'); pre.readOnly = true; pre.style.minHeight = '90px'; pre.value = promptTexte;
+  details.append(summary, pre);
+  card.append(h, imageEl, btns, details);
+  return card;
+}
+
+$('btnVignette').onclick = async () => {
+  const status = $('vignetteStatus'), box = $('vignetteResult');
+  const key = $('geminiKey').value.trim();
+  if(!key){ status.innerHTML = '<span class="bad">Colle ta clé API Gemini (onglet 1, carte 3).</span>'; return; }
+  status.innerHTML = "Génération de l'image…"; box.innerHTML = '';
+  $('btnVignette').disabled = true;
+  try{
+    const prompt = promptVignette($('titreMorceau').value.trim(), $('seoContexte').value.trim(), $('ficheStyle').value.trim());
+    const img = await callGeminiImageChain(prompt);
+    box.appendChild(blocImage('Vignette YouTube', prompt, img));
+    status.innerHTML = '<span class="ok">Image générée.</span>';
+  }catch(err){
+    status.innerHTML = `<span class="bad">Échec : ${escHtml(err.message || String(err))}</span>`;
+  }finally{
+    $('btnVignette').disabled = false;
+  }
+};
+
+$('btnStoryboard').onclick = async () => {
+  const status = $('storyboardStatus'), box = $('storyboardResult');
+  const key = $('geminiKey').value.trim();
+  if(!key){ status.innerHTML = '<span class="bad">Colle ta clé API Gemini (onglet 1, carte 3).</span>'; return; }
+
+  const blocs = []; let label = null, buf = [];
+  const flush = () => { if(buf.length) blocs.push({ label, lignes: buf }); buf = []; };
+  state.lines.forEach(l => { if(l.type === 'section'){ flush(); label = l.text; } else buf.push(l); });
+  flush();
+  if(!blocs.length){ status.innerHTML = '<span class="bad">Ajoute des paroles avec des balises [Couplet]/[Refrain] (onglet 1) — le storyboard s\'appuie dessus pour découper les scènes.</span>'; return; }
+
+  box.innerHTML = '';
+  $('btnStoryboard').disabled = true;
+  const style = $('ficheStyle').value.trim();
+  let ok = 0;
+  for(const bloc of blocs){
+    const nom = bloc.label || 'Intro';
+    status.innerHTML = `Génération "${escHtml(nom)}"… (${ok}/${blocs.length})`;
+    try{
+      const prompt = promptVisuelSection(nom, bloc.lignes, style);
+      const img = await callGeminiImageChain(prompt);
+      box.appendChild(blocImage(nom, prompt, img));
+      ok++;
+    }catch(err){
+      const card = document.createElement('div');
+      card.className = 'card nested'; card.style.marginTop = '10px';
+      const h = document.createElement('h2'); h.style.fontSize = '13px'; h.textContent = nom;
+      const p = document.createElement('p'); p.className = 'bad'; p.style.fontSize = '12.5px';
+      p.textContent = 'Échec : ' + (err.message || String(err));
+      card.append(h, p);
+      box.appendChild(card);
+    }
+  }
+  status.innerHTML = `<span class="ok">${ok}/${blocs.length} image(s) générée(s).</span>`;
+  $('btnStoryboard').disabled = false;
 };
 
 /* ═══════════════════ INIT ═══════════════════ */
