@@ -275,11 +275,17 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
       <input type="text" id="geminiModel" style="width:100%" value="gemini-3.5-flash">
       <div class="row" style="margin-top:8px">
         <button id="btnAI">Pré-remplir le calage avec l'IA</button>
+        <button id="btnTestGemini" class="small ghost">🔧 Tester la connexion</button>
       </div>
       <div class="status" id="aiStatus"></div>
+      <div class="status" id="testGeminiStatus"></div>
       <details>
         <summary>D'où avoir une clé ?</summary>
         <p class="hint">aistudio.google.com → "Get API key". Offre gratuite disponible. La clé ne quitte jamais ton navigateur (envoyée directement à Google, jamais à un serveur intermédiaire).</p>
+      </details>
+      <details>
+        <summary>Une fonction IA ne répond jamais, aucun message ?</summary>
+        <p class="hint">Clique "Tester la connexion" ci-dessus — ça isole le problème en 10 secondes. Si ce test échoue aussi : essaie d'ouvrir ce fichier directement depuis Chrome (Fichiers → ce fichier, ou glisser dans la barre d'adresse) plutôt que via une appli intermédiaire (gestionnaire de fichiers) — certains navigateurs mobiles bloquent silencieusement les requêtes réseau selon comment la page a été ouverte.</p>
       </details>
     </div>
 
@@ -1166,6 +1172,38 @@ async function callGeminiChain(parts, schema){
   }
   throw new Error(lastErr || "Échec sur tous les modèles.");
 }
+
+/* ═══════════════════ DIAGNOSTIC — isoler un souci de connexion en 10s ═══════════════════
+   Retour de terrain : une fonction IA qui ne répond jamais (ni résultat, ni
+   erreur) est très difficile à diagnostiquer à distance. Ce bouton fait un
+   appel minimal et affiche TOUT ce qui se passe — succès, code HTTP exact,
+   ou l'erreur de fetchAvecDelai elle-même — pour transformer "rien ne se
+   passe" en un message concret et actionnable. */
+$('btnTestGemini').onclick = async () => {
+  const status = $('testGeminiStatus');
+  const key = $('geminiKey').value.trim();
+  if(!key){ status.innerHTML = '<span class="bad">Colle d\'abord une clé API Gemini ci-dessus.</span>'; return; }
+  status.innerHTML = 'Test en cours (jusqu\'à 10s)…';
+  $('btnTestGemini').disabled = true;
+  const t0 = Date.now();
+  try{
+    const res = await fetchAvecDelai(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=5`, { headers: { "x-goog-api-key": key } }, 10000);
+    const dureeS = ((Date.now() - t0) / 1000).toFixed(1);
+    if(res.ok){
+      const d = await res.json();
+      const nb = (d.models || []).length;
+      status.innerHTML = `<span class="ok">✅ Ça fonctionne (${dureeS}s) — ${nb} modèle(s) trouvé(s) sur cette clé.</span>`;
+    }else{
+      let msg = ""; try{ msg = (await res.json()).error?.message || ""; }catch(e){}
+      status.innerHTML = `<span class="bad">HTTP ${res.status}${msg ? " — " + escHtml(msg) : ""} (${dureeS}s)</span>`;
+    }
+  }catch(err){
+    const dureeS = ((Date.now() - t0) / 1000).toFixed(1);
+    status.innerHTML = `<span class="bad">${escHtml(err.message || String(err))} (après ${dureeS}s)</span>`;
+  }finally{
+    $('btnTestGemini').disabled = false;
+  }
+};
 
 /* ═══════════════════ 5. PRÉ-REMPLISSAGE IA DU CALAGE ═══════════════════ */
 $('btnAI').onclick = async () => {
