@@ -174,16 +174,19 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px
         </select>
       </div>
       <div>
-        <label for="genStyle">Style / registre</label>
-        <select id="genStyle">
-          <option value="piano" selected>Piano introspectif (défaut Pixel Papa)</option>
-          <option value="epique">Épique sombre</option>
-          <option value="retro">Retrogaming</option>
-          <option value="leger">Léger / familial</option>
+        <label for="genRegistre">Style / registre</label>
+        <select id="genRegistre">
+          <option value="piano" selected>Standard — Piano introspectif (défaut Pixel Papa)</option>
+          <option value="epique">Standard — Épique sombre</option>
+          <option value="synthwave">Standard — Rétro synthwave / chiptune</option>
+          <option value="ep_thematique">EP thématique (name-drop permis, ex. anime)</option>
+          <option value="leger">Léger / familial (règles assouplies)</option>
+          <option value="instrumental">Instrumental (sans paroles chantées)</option>
           <option value="autre">Autre (précise ci-dessous)</option>
         </select>
       </div>
     </div>
+    <p class="hint">Pour mélanger deux genres : décris-le dans les instructions ci-dessous (deux genres maximum, le dominant en premier, ajoute un marqueur d'époque, et pense à monter le Weirdness dans Suno pour que le mélange ne se normalise pas).</p>
 
     <label for="genPrompt" style="margin-top:10px">Instructions supplémentaires (optionnel)</label>
     <textarea id="genPrompt" style="min-height:70px" placeholder="Tout ce qui compte pour ce morceau : références à utiliser, ambiance précise, un refrain déjà en tête, des messages spécifiques..."></textarea>
@@ -622,27 +625,35 @@ const STRUCTURES_LONGUEUR = {
   "3m30": "Structure : Intro 4 + Couplet 1 (16 bars) + Refrain 8 + Couplet 2 (16 bars) + Refrain 8 + Pont 8 + Couplet 3 (12 à 16 bars) + Refrain 8 + Outro 4 (~75-85 bars au total). TROIS couplets complets, c'est le format standard — ne jamais réduire à deux (l'erreur la plus fréquente).",
   "4m00": "Comme la structure 3m30-3m50, avec un Pre-Chorus de 4 bars ajouté avant CHAQUE refrain (~86 bars). TROIS couplets complets."
 };
-const PRESETS_STYLE_GEN = {
-  piano: "melancholic French rap, mid-tempo, sparse grand piano lead, warm male vocals, intimate conversational flow, warm analog recording, introspective",
-  epique: "dark cinematic French rap, orchestral strings and low choir, heavy 808 drums, commanding male vocals, dramatic and menacing",
-  retro: "retro chiptune hip-hop, 8-bit synth leads, boom bap drums, French male vocals, nostalgic and playful, lo-fi warmth",
-  leger: "retro chiptune hip-hop, sung melodic chorus, airy layered backing vocals, French male vocals, nostalgic and playful, lo-fi warmth",
-  autre: ""
+/* Deux sources fusionnées : le skill pixel-papa-suno (règles d'écriture,
+   structure en bars) et le Gem Gemini de l'utilisateur (registres
+   Standard/EP thématique/Léger/Instrumental, bloc d'archivage). Où elles
+   divergeaient (le "Standard" du Gem est chiptune/electro/synthwave, celui
+   du skill est piano introspectif), les DEUX restent proposées au choix
+   plutôt que de trancher à sa place. */
+const REGISTRES_GEN = {
+  piano:       { style: "melancholic French rap, mid-tempo, sparse grand piano lead, warm male vocals, intimate conversational flow, warm analog recording, introspective", regles: "", instrumental: false },
+  epique:      { style: "dark cinematic French rap, orchestral strings and low choir, heavy 808 drums, commanding male vocals, dramatic and menacing", regles: "", instrumental: false },
+  synthwave:   { style: "chiptune, electro, dark synthwave, driving arpeggios, French male vocals", regles: "", instrumental: false },
+  ep_thematique: { style: "epic anime rock, orchestral brass, driving drums, powerful male vocals", regles: 'RÈGLE ASSOUPLIE POUR CE REGISTRE : les références frontales et le name-drop (univers, franchise, personnages) sont EXCEPTIONNELLEMENT permis — c\'est le seul registre où la règle "une référence par bar, toujours en métaphore" ne s\'applique pas.', instrumental: false },
+  leger:       { style: "retro chiptune hip-hop, sung melodic chorus, airy layered backing vocals, French male vocals, nostalgic and playful, lo-fi warmth", regles: 'RÈGLE ASSOUPLIE POUR CE REGISTRE : phrases plus longues et chantantes, la contrainte "une référence par bar" se relâche — priorité à ce qui se chante bien.', instrumental: false },
+  instrumental:{ style: "cinematic instrumental, rich arrangement, dynamic build and release", regles: "", instrumental: true },
+  autre:       { style: "", regles: "", instrumental: false }
 };
 
 function promptGenerationTexte(){
   const theme = $('genTheme').value.trim();
   const message = $('genMessage').value.trim();
   const longueur = $('genLongueur').value;
-  const presetStyle = PRESETS_STYLE_GEN[$('genStyle').value];
+  const registre = REGISTRES_GEN[$('genRegistre').value] || REGISTRES_GEN.autre;
   const instructions = $('genPrompt').value.trim();
 
-  return `Tu écris un premier jet de chanson pour Pixel Papa : rap français introspectif, piano au premier plan par défaut, métaphorique plutôt que frontal, dense en références geek/cinéma/mythologie/psychologie, épuré mais jamais court.
+  return `Tu écris un premier jet de chanson pour Pixel Papa : rap français introspectif par défaut, métaphorique plutôt que frontal, dense en références geek/cinéma/mythologie/psychologie, épuré mais jamais court.
 
-RÈGLES D'ÉCRITURE (non négociables) :
+RÈGLES D'ÉCRITURE DE BASE (non négociables sauf ajustement de registre ci-dessous) :
 1. Phrases courtes, sujet-verbe-image — la punchline meurt dans la subordonnée.
 2. Rimes riches : au moins 3 sons partagés sur les chutes.
-3. Une seule référence par bar maximum, TOUJOURS en métaphore (jamais en name-drop brut), et JAMAIS un nom d'artiste réel — traduis toute inspiration en descripteurs.
+3. Une seule référence par bar maximum, toujours en métaphore, jamais un nom d'artiste réel.
 4. Une seule métaphore filée sur tout le morceau : elle s'ouvre au couplet 1, se fissure au 2, se retourne au 3.
 5. Concret plutôt qu'abstrait — un objet, une heure, un bruit précis, pas un concept.
 6. Le refrain est une phrase-titre de 4 à 8 lignes, texte STRICTEMENT identique à chaque reprise.
@@ -650,7 +661,7 @@ RÈGLES D'ÉCRITURE (non négociables) :
 8. Pas de morale finale : l'outro laisse la question ouverte.
 9. Jamais l'angle "père absent" frontal — la nuance juste est "absent en pensée, présent en actes".
 10. Vérifie mentalement que chaque ligne se dit d'un souffle.
-
+${registre.regles ? "\n" + registre.regles + "\n" : ""}
 ${STRUCTURES_LONGUEUR[longueur]}
 
 THÉMATIQUE : ${theme || "(libre — propose quelque chose dans l'esprit Pixel Papa)"}
@@ -659,11 +670,33 @@ ${instructions ? "INSTRUCTIONS SUPPLÉMENTAIRES : " + instructions : ""}
 
 FORMAT DE LIVRAISON (obligatoire, JSON) :
 - "titre" : le titre du morceau.
-- "style_field" : le champ Style Suno — 4 à 7 descripteurs EN ANGLAIS séparés par des virgules, genre principal en premier, AUCUN nom d'artiste réel.${presetStyle ? ` Pars de cette base et adapte-la légèrement au thème : "${presetStyle}".` : " Choisis des descripteurs cohérents avec le thème et la charte ci-dessus."}
-- "lyrics_field" : le champ Lyrics Suno — paroles en FRANÇAIS, avec des metatags de structure EN ANGLAIS entre crochets (ex. [Verse 1: sparse piano, brushed drums], [Chorus: full arrangement, sung melodic vocals], [Bridge], [Outro]), respectant la structure demandée plus haut. Écris les chiffres en toutes lettres et les sigles séparés par des tirets (ex. "P-S-deux", pas "PS2"). Termine OBLIGATOIREMENT par la ligne [End].
-- "notes" : 2 à 3 phrases de rappel — points à vérifier avant de coller dans Suno (réglages de sliders, prononciation à tester...).
+- "style_field" : le champ Style Suno — 4 à 7 descripteurs EN ANGLAIS séparés par des virgules, genre principal en premier, AUCUN nom d'artiste réel.${registre.style ? ` Pars de cette base et adapte-la légèrement au thème : "${registre.style}".` : " Choisis des descripteurs cohérents avec le thème et la charte ci-dessus."}
+- "lyrics_field" : ${registre.instrumental
+    ? "le champ Lyrics Suno — mode INSTRUMENTAL : aucune parole chantée, UNIQUEMENT des metatags de structure entre crochets en anglais (ex. [Intro], [Theme A], [Build], [Instrumental Break], [Climax], [Outro]), terminé OBLIGATOIREMENT par [End]."
+    : 'le champ Lyrics Suno — paroles en FRANÇAIS, avec des metatags de structure EN ANGLAIS entre crochets (ex. [Verse 1: sparse piano, brushed drums], [Chorus: full arrangement, sung melodic vocals], [Bridge], [Outro]), respectant la structure demandée plus haut. Écris les chiffres en toutes lettres et les sigles séparés par des tirets (ex. "P-S-deux", pas "PS2"). Termine OBLIGATOIREMENT par la ligne [End].'}
+- "notes" : 2 à 3 phrases de rappel — points à vérifier avant de coller dans Suno (réglages de sliders, prononciation à tester, Prompt Enhancement Helper à désactiver...).
 
 Ne mentionne aucun nom d'artiste réel, nulle part dans la réponse.`;
+}
+
+/* Bloc d'archivage : "les paroles écrites à la main renforcent la
+   revendication d'auteur — archiver le texte et le prompt exact" (skill ET
+   Gem, d'accord sur ce point). Un fichier .txt daté, à garder de son côté. */
+function blocArchivage(data){
+  const date = new Date().toISOString().slice(0, 10);
+  return `PIXEL PAPA — BLOC D'ARCHIVAGE (${date})
+Titre : ${data.titre || ''}
+Thème : ${$('genTheme').value.trim() || '(non précisé)'}
+Message / thèse : ${$('genMessage').value.trim() || '(non précisé)'}
+Registre : ${$('genRegistre').selectedOptions[0].textContent}
+Longueur cible : ${$('genLongueur').selectedOptions[0].textContent}
+
+--- STYLE (champ Suno) ---
+${data.style_field || ''}
+
+--- LYRICS (champ Suno) ---
+${data.lyrics_field || ''}
+`;
 }
 
 function renderGenResult(data){
@@ -674,9 +707,12 @@ function renderGenResult(data){
   box.appendChild(champSEO('Lyrics (à coller dans Suno)', data.lyrics_field || ''));
   if(data.notes) box.appendChild(champSEO('À vérifier avant Suno', data.notes));
 
+  const btns = document.createElement('div');
+  btns.className = 'exportbtns';
+  btns.style.marginTop = '10px';
+
   const btnUtiliser = document.createElement('button');
   btnUtiliser.className = 'primary';
-  btnUtiliser.style.marginTop = '10px';
   btnUtiliser.textContent = 'Utiliser ce texte ↓ (remplit Titre + Paroles ci-dessous)';
   btnUtiliser.onclick = () => {
     $('ecritureTitre').value = data.titre || '';
@@ -685,7 +721,15 @@ function renderGenResult(data){
     btnUtiliser.textContent = 'Utilisé ✓ — modifie ci-dessous si besoin';
     btnUtiliser.disabled = true;
   };
-  box.appendChild(btnUtiliser);
+  const btnArchive = document.createElement('button');
+  btnArchive.className = 'small ghost';
+  btnArchive.textContent = "Télécharger le bloc d'archivage (.txt)";
+  btnArchive.onclick = () => {
+    const nomFichier = (data.titre || 'pixel-papa').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-archive.txt';
+    download(nomFichier, blocArchivage(data), 'text/plain');
+  };
+  btns.append(btnUtiliser, btnArchive);
+  box.appendChild(btns);
 }
 
 $('btnGenererTexte').onclick = async () => {
