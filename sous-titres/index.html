@@ -336,8 +336,25 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
 <!-- ═══════════════════ ONGLET 7 : VISUELS (images générées) ═══════════════════ -->
 <section id="tab-visuels" class="tabpanel">
   <div class="card" style="max-width:640px">
+    <h2>Image de référence (optionnel)</h2>
+    <p class="hint">Une photo, une illustration, un personnage récurrent... — pour caler le style (et si possible un personnage) sur cette référence précise, comme un transfert de style classique.</p>
+    <div class="dropzone" id="dropzoneRef">Dépose une image ici, ou clique pour la choisir<br>
+      <input type="file" id="fileRef" accept="image/*" style="display:none">
+    </div>
+    <img id="refPreview" style="display:none;max-width:220px;max-height:220px;border-radius:8px;border:1px solid var(--border);margin-top:8px">
+    <div class="row" style="margin-top:8px;align-items:center">
+      <button id="btnAnalyserStyle" disabled>Analyser le style de cette image</button>
+      <label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12.5px;color:var(--text-muted)">
+        <input type="checkbox" id="refDirecte" style="width:auto">
+        L'utiliser aussi comme référence directe (personnage) lors de la génération
+      </label>
+    </div>
+    <div class="status" id="refStatus"></div>
+  </div>
+
+  <div class="card" style="max-width:640px">
     <h2>Fiche de style Pixel Papa</h2>
-    <p class="hint">Réutilisée dans chaque image générée ci-dessous, pour rester cohérent visuellement d'un morceau à l'autre. Modifiable.</p>
+    <p class="hint">Réutilisée dans chaque image générée ci-dessous, pour rester cohérent visuellement d'un morceau à l'autre. Remplie automatiquement si tu analyses une image de référence ci-dessus — sinon modifiable librement.</p>
     <textarea id="ficheStyle" style="min-height:130px">Pixel art rétro-gaming façon borne d'arcade des années 80-90 : contours noirs épais, ombrage par aplats/blocs nets (pas de dégradé photoréaliste). Palette dominante noir + or/ambre chaud, avec touches turquoise/cyan en accent (contours, reflets, éclats). Ambiance chaleureuse et espiègle, iconographie arcade (manettes, joysticks, croix directionnelles, pièces, étincelles).</textarea>
   </div>
 
@@ -1217,9 +1234,9 @@ async function modelesImageDisponibles(){
   return imageModelsCache;
 }
 
-async function callGeminiImageOnce(model, prompt, avecModalites){
+async function callGeminiImageOnce(model, requestParts, avecModalites){
   const key = $('geminiKey').value.trim();
-  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+  const body = { contents: [{ role: "user", parts: requestParts }] };
   // Certains modèles (générations "preview") exigent responseModalities
   // pour renvoyer une image, d'autres le refusent en 400 : on tente les
   // deux formes plutôt que de deviner.
@@ -1242,18 +1259,88 @@ async function callGeminiImageOnce(model, prompt, avecModalites){
   return { mime: imgPart.inlineData.mimeType, data: imgPart.inlineData.data };
 }
 
-async function callGeminiImageChain(prompt){
+async function callGeminiImageChain(parts){
   const modeles = await modelesImageDisponibles();
   let lastErr = "";
   for(const m of modeles){
     for(const avecModalites of [true, false]){
       try{
-        const img = await callGeminiImageOnce(m, prompt, avecModalites);
+        const img = await callGeminiImageOnce(m, parts, avecModalites);
         return { ...img, model: m };
       }catch(err){ lastErr = err.message || String(err); }
     }
   }
   throw new Error(lastErr || "Échec sur tous les modèles image disponibles sur cette clé.");
+}
+
+/* ═══════════════════ Image de référence (transfert de style / personnage) ═══════════════════
+   Même principe que le skill « style-transfer-portrait » : une image de
+   référence sert de base, soit pour EXTRAIRE une description de style
+   réutilisable (analyse texte, moins cher, marche avec tout modèle
+   texte/vision), soit comme ENTRÉE DIRECTE de la génération d'image
+   (certains modèles image savent alors reprendre le style et le
+   personnage de l'image fournie, pas seulement d'après sa description). */
+const refState = { base64: null, mime: null };
+const dropzoneRef = $('dropzoneRef'), fileRef = $('fileRef');
+
+function handleRefFile(file){
+  if(!file || !/^image\//.test(file.type)){ alert("Ce fichier ne ressemble pas à une image."); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = String(reader.result);
+    refState.base64 = dataUrl.split(',')[1] || "";
+    refState.mime = file.type;
+    $('refPreview').src = dataUrl;
+    $('refPreview').style.display = 'block';
+    $('btnAnalyserStyle').disabled = false;
+    $('refDirecte').checked = true;
+  };
+  reader.readAsDataURL(file);
+}
+dropzoneRef.onclick = () => fileRef.click();
+fileRef.onchange = e => handleRefFile(e.target.files[0]);
+["dragover","dragenter"].forEach(ev => dropzoneRef.addEventListener(ev, e => { e.preventDefault(); dropzoneRef.classList.add('drag'); }));
+["dragleave","drop"].forEach(ev => dropzoneRef.addEventListener(ev, e => { e.preventDefault(); dropzoneRef.classList.remove('drag'); }));
+dropzoneRef.addEventListener('drop', e => handleRefFile(e.dataTransfer.files[0]));
+
+const STYLE_SCHEMA = { type: "OBJECT", properties: { style: { type: "STRING" } } };
+
+$('btnAnalyserStyle').onclick = async () => {
+  const status = $('refStatus');
+  const key = $('geminiKey').value.trim();
+  if(!key){ status.innerHTML = '<span class="bad">Colle ta clé API Gemini (onglet 1, carte 3).</span>'; return; }
+  if(!refState.base64) return;
+  status.innerHTML = 'Analyse du style…';
+  $('btnAnalyserStyle').disabled = true;
+  try{
+    const prompt = `Regarde cette image de référence. Décris son STYLE VISUEL de façon réutilisable pour générer D'AUTRES images dans le même style — pas ce qu'elle montre, mais COMMENT elle est rendue : technique (pixel art, aquarelle, 3D, photo...), palette de couleurs dominante, traits/contours, lumière et ombrage, ambiance générale. S'il y a un personnage récurrent à préserver, décris aussi son apparence physique et sa tenue pour pouvoir le refaire apparaître à l'identique.
+Réponds en 5 à 8 phrases denses, en français, directement utilisables comme fiche de style dans un prompt de génération d'image.`;
+    const data = await callGeminiChain(
+      [{ inlineData: { mimeType: refState.mime, data: refState.base64 } }, { text: prompt }],
+      STYLE_SCHEMA
+    );
+    if(!data || !data.style) throw new Error("Réponse inattendue.");
+    $('ficheStyle').value = data.style.trim();
+    draftSave();
+    status.innerHTML = '<span class="ok">Style extrait et appliqué à la fiche de style ci-dessous.</span>';
+  }catch(err){
+    status.innerHTML = `<span class="bad">Échec : ${escHtml(err.message || String(err))}</span>`;
+  }finally{
+    $('btnAnalyserStyle').disabled = false;
+  }
+};
+
+/* Construit les parts envoyées à la génération d'image : le texte du
+   prompt, précédé de l'image de référence si elle est chargée ET que la
+   case "référence directe" est cochée. */
+function buildImageParts(promptTexte){
+  const parts = [];
+  if(refState.base64 && $('refDirecte').checked){
+    parts.push({ inlineData: { mimeType: refState.mime, data: refState.base64 } });
+    promptTexte += "\n\nUne image de référence est fournie en entrée : reprends son style, et si elle montre un personnage, fais-le réapparaître à l'identique (même apparence, même tenue, mêmes couleurs).";
+  }
+  parts.push({ text: promptTexte });
+  return parts;
 }
 
 function promptVisuelSection(label, lignes, styleSheet){
@@ -1304,7 +1391,7 @@ $('btnVignette').onclick = async () => {
   $('btnVignette').disabled = true;
   try{
     const prompt = promptVignette($('titreMorceau').value.trim(), $('seoContexte').value.trim(), $('ficheStyle').value.trim());
-    const img = await callGeminiImageChain(prompt);
+    const img = await callGeminiImageChain(buildImageParts(prompt));
     box.appendChild(blocImage('Vignette YouTube', prompt, img));
     status.innerHTML = '<span class="ok">Image générée.</span>';
   }catch(err){
@@ -1334,7 +1421,7 @@ $('btnStoryboard').onclick = async () => {
     status.innerHTML = `Génération "${escHtml(nom)}"… (${ok}/${blocs.length})`;
     try{
       const prompt = promptVisuelSection(nom, bloc.lignes, style);
-      const img = await callGeminiImageChain(prompt);
+      const img = await callGeminiImageChain(buildImageParts(prompt));
       box.appendChild(blocImage(nom, prompt, img));
       ok++;
     }catch(err){
