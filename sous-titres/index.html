@@ -1054,6 +1054,60 @@ function fileToBase64(file){
   });
 }
 
+/* ══════ LECTURE TOLÉRANTE DU JSON ══════
+   Un JSON.parse strict casse dès qu'un champ contient un retour à la ligne
+   BRUT (non échappé en \n) — exactement ce que produisent des paroles
+   multi-lignes malgré la consigne responseMimeType:"application/json" :
+   le modèle respecte le format mais laisse parfois passer un saut de ligne
+   littéral dans une valeur de chaîne, ce qui est illégal en JSON strict.
+   Repère du terrain : "Générer le premier jet" renvoyait des champs vides
+   sans erreur visible — signe d'un JSON qui ne parsait plus du tout.
+   Même parade que l'appli Insert Coin dont cet outil est issu (voir sa
+   fonction jsonRepare() dans src/api/gemini.js), adaptée ici. */
+function jsonRepare(raw){
+  let t = String(raw || "").replace(/```json|```/g, "");
+  t = t.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "");
+  // Racine objet OU tableau : le pré-remplissage du calage attend un tableau
+  // de nombres, le reste (SEO, générateur de texte, style...) attend un objet.
+  const depObj = t.indexOf("{"), depArr = t.indexOf("[");
+  const dep = depObj < 0 ? depArr : (depArr < 0 ? depObj : Math.min(depObj, depArr));
+  if(dep < 0) return null;
+
+  let out = "", pile = [], ins = false, ech = false, fini = false;
+  for(let i = dep; i < t.length && !fini; i++){
+    const c = t[i];
+    if(ech){ out += c; ech = false; continue; }
+    if(c === "\\"){ out += c; ech = true; continue; }
+    if(c === '"'){ ins = !ins; out += c; continue; }
+    if(ins){
+      // Retour à la ligne brut au milieu d'une valeur : illégal en JSON,
+      // on l'échappe au lieu de laisser JSON.parse tout rejeter en bloc.
+      if(c === "\n") out += "\\n";
+      else if(c === "\r") out += "\\r";
+      else if(c === "\t") out += "\\t";
+      else out += c;
+      continue;
+    }
+    if(c === "{" || c === "[") pile.push(c);
+    else if(c === "}" || c === "]"){
+      pile.pop();
+      if(!pile.length){ out += c; fini = true; break; }
+    }
+    out += c;
+  }
+  if(!fini){
+    if(ins) out += '"';
+    out = out.replace(/,\s*$/, "").replace(/:\s*$/, ": null");
+    while(pile.length) out += (pile.pop() === "[" ? "]" : "}");
+  }
+  out = out.replace(/,\s*([}\]])/g, "$1");
+
+  try{ return JSON.parse(out); }catch(e){}
+  const b = Math.max(t.lastIndexOf("}"), t.lastIndexOf("]"));
+  if(b > dep){ try{ return JSON.parse(t.slice(dep, b + 1)); }catch(e){} }
+  return null;
+}
+
 async function callGemini(model, parts, schema){
   const key = $('geminiKey').value.trim();
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -1072,7 +1126,10 @@ async function callGemini(model, parts, schema){
   const cand = (data.candidates || [])[0];
   if(!cand) throw new Error(data.promptFeedback?.blockReason || "Réponse vide");
   const raw = ((cand.content && cand.content.parts) || []).map(p => p.text || "").join("");
-  return JSON.parse(raw);
+  const parsed = jsonRepare(raw);
+  if(parsed) return parsed;
+  if(cand.finishReason === "MAX_TOKENS") throw new Error("Réponse tronquée (budget de jetons dépassé) — réessaie, ou raccourcis la demande.");
+  throw new Error("Réponse illisible (JSON invalide malgré la consigne).");
 }
 
 async function callGeminiChain(parts, schema){
