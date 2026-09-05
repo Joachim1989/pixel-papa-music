@@ -129,7 +129,8 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px
 </header>
 
 <nav class="tabs" id="tabs">
-  <button class="tab active" data-tab="calage">1. Calage</button>
+  <button class="tab active" data-tab="ecriture">0. Écriture</button>
+  <button class="tab" data-tab="calage">1. Calage</button>
   <button class="tab" data-tab="soustitres">2. Sous-titres</button>
   <button class="tab" data-tab="karaoke">3. Karaoké</button>
   <button class="tab" data-tab="animation">4. Repères animation</button>
@@ -139,8 +140,38 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px
   <button class="tab" data-tab="apercu">8. Aperçu</button>
 </nav>
 
+<!-- ═══════════════════ ONGLET 0 : ÉCRITURE (avant Suno) ═══════════════════
+     PAS un générateur : l'écriture (angles, vérif rimes/minutage/prononciation)
+     marche mieux en conversation avec Claude (skill pixel-papa-suno) qu'en un
+     appel Gemini isolé — cet onglet ne fait que récupérer ce qui a déjà été
+     écrit et l'envoyer vers le Calage sans re-taper, plus un pense-bête de
+     vérifications avant de générer dans Suno. -->
+<section id="tab-ecriture" class="tabpanel active">
+  <div class="card" style="max-width:640px">
+    <h2>0. Écriture (avant Suno)</h2>
+    <p class="hint">L'écriture elle-même (angles, paroles, bloc Style/Lyrics/Title) se fait mieux en conversation avec Claude — demande le skill <code>pixel-papa-suno</code>, qui propose des angles puis vérifie rimes, minutage et prononciation avant de livrer. Un bouton "générer" ici sauterait ces vérifications et livrerait un texte moins abouti. Cet onglet sert juste à récupérer ce qui a été écrit et enchaîner sans re-taper.</p>
+    <label for="ecritureTitre">Titre (du bloc Suno)</label>
+    <input type="text" id="ecritureTitre" style="width:100%">
+    <label for="ecritureParoles" style="margin-top:10px">Paroles (colle le champ Lyrics écrit avec Claude)</label>
+    <textarea id="ecritureParoles" style="min-height:220px" placeholder="Colle ici les paroles telles qu'écrites avec Claude — balises [Couplet]/[Refrain] ou [Verse]/[Chorus] acceptées."></textarea>
+    <div class="row" style="margin-top:8px"><button id="btnEnvoyerCalage" class="primary">Envoyer vers Calage →</button></div>
+    <div class="status" id="ecritureStatus"></div>
+  </div>
+
+  <div class="card" style="max-width:640px">
+    <h2>Check avant de générer dans Suno</h2>
+    <p class="hint">Rappels tirés du skill d'écriture — coche au fur et à mesure, purement indicatif (rien n'est sauvegardé).</p>
+    <div id="checklistSuno"></div>
+  </div>
+
+  <div class="card" style="max-width:640px">
+    <h2>⚠️ Suno limite les téléchargements, pas les crédits</h2>
+    <p class="hint">Depuis septembre 2026, la vraie contrainte Suno est le nombre de <b>téléchargements</b> (20/mois en Pro, 60 en Premier), plus les crédits de génération. Écoute et trie directement dans Suno, et ne télécharge que la version finale avant de revenir ici pour le calage.</p>
+  </div>
+</section>
+
 <!-- ═══════════════════ ONGLET 1 : CALAGE (paroles, audio, tap-to-sync) ═══════════════════ -->
-<section id="tab-calage" class="tabpanel active">
+<section id="tab-calage" class="tabpanel">
 <div class="grid">
 
   <!-- COLONNE GAUCHE : entrées + IA + réglages -->
@@ -380,7 +411,7 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
   <div class="card" style="max-width:640px">
     <h2>Storyboard par section</h2>
     <p class="hint">Une image par section détectée dans les paroles ([Couplet]/[Refrain]/[Pont]...) — pour poser les décors d'un montage animé sans partir de zéro. Génère les images une par une (peut prendre un moment sur une chanson à beaucoup de sections).</p>
-    <div class="row"><button id="btnStoryboard" class="primary">Générer le storyboard</button></div>
+    <div class="row"><button id="btnStoryboard" class="primary">Générer le storyboard</button><button id="btnTeleTout" class="small ghost" style="display:none">Tout télécharger</button></div>
     <div class="status" id="storyboardStatus"></div>
     <div id="storyboardResult"></div>
   </div>
@@ -413,7 +444,8 @@ const state = {
   previewEnd: null, // fin de la prévisualisation "hook" en cours (voir onglet 6)
   playingIndex: -1, // ligne actuellement chantée d'après le calage existant (suivi de lecture)
   previewSectionIndex: -1, // section actuellement en cours, pour l'aperçu animé (onglet 8)
-  storyboard: [] // [{label, dataUrl}] dans l'ordre des sections, rempli par "Générer le storyboard"
+  storyboard: [], // [{label, dataUrl}] dans l'ordre des sections, rempli par "Générer le storyboard"
+  visualsGenerated: false // au moins une image générée cette session (jamais sauvée en localStorage, trop lourd) — avertit avant de fermer/rafraîchir
 };
 
 const $ = id => document.getElementById(id);
@@ -429,6 +461,44 @@ document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => {
   $('tab-' + btn.dataset.tab).classList.add('active');
   if(btn.dataset.tab === 'apercu') updateApercu();
 });
+
+/* ═══════════════════ 0. ÉCRITURE (avant Suno) ═══════════════════ */
+const CHECKLIST_SUNO = [
+  "Trois couplets si la cible est 3m30+ (compter les bars, pas à l'estimation)",
+  "Refrain identique au mot près à chaque reprise",
+  "Rimes riches sur les chutes (3 sons partagés minimum)",
+  "Une seule métaphore filée, une référence par bar maximum",
+  "Aucune ligne trop longue pour être dite d'un souffle",
+  "Chiffres écrits en toutes lettres, sigles séparés (ex. P-S-deux, pas PS2)",
+  "[End] présent à la fin du champ Lyrics",
+  "Aucun nom d'artiste réel dans le champ Style (descripteurs à la place)",
+  "Prompt Enhancement Helper désactivé dans Suno"
+];
+(function initChecklistSuno(){
+  const box = $('checklistSuno');
+  if(!box) return;
+  CHECKLIST_SUNO.forEach((texte, i) => {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:flex-start;gap:8px;font-size:13px;margin-top:6px;cursor:pointer';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.style.cssText = 'width:auto;margin-top:3px';
+    cb.onchange = () => { label.style.color = cb.checked ? 'var(--text-muted)' : 'var(--text)'; label.style.textDecoration = cb.checked ? 'line-through' : 'none'; };
+    const span = document.createElement('span'); span.textContent = texte;
+    label.append(cb, span);
+    box.appendChild(label);
+  });
+})();
+
+$('btnEnvoyerCalage').onclick = () => {
+  const status = $('ecritureStatus');
+  const paroles = $('ecritureParoles').value.trim();
+  if(!paroles){ status.innerHTML = '<span class="bad">Colle d\'abord les paroles écrites avec Claude.</span>'; return; }
+  $('titreMorceau').value = $('ecritureTitre').value.trim();
+  $('paroles').value = paroles;
+  draftSave();
+  $('btnDecouper').click();
+  document.querySelector('.tab[data-tab="calage"]').click();
+  status.innerHTML = '<span class="ok">Envoyé — tu es maintenant sur l\'onglet Calage, charge l\'audio téléchargé depuis Suno.</span>';
+};
 
 /* ═══════════════════ PERSISTANCE (brouillon local) ═══════════════════
    Seuls le texte, les timings et les petits champs sont sauvés — jamais
@@ -1293,13 +1363,22 @@ async function callGeminiImageOnce(model, requestParts, avecModalites){
   return { mime: imgPart.inlineData.mimeType, data: imgPart.inlineData.data };
 }
 
+const IMAGE_MODEL_STORE = "pixelpapa.subtitles.gemini.imagemodel";
+
 async function callGeminiImageChain(parts){
   const modeles = await modelesImageDisponibles();
+  // Le modèle qui a marché la dernière fois est retenté EN PREMIER : sans ça,
+  // chaque scène du storyboard repart de zéro dans la liste (jusqu'à
+  // modèles × 2 configurations avant de retomber sur le bon), ce qui coûte
+  // du temps et des appels inutiles à chaque génération.
+  let dernier = null; try{ dernier = localStorage.getItem(IMAGE_MODEL_STORE); }catch(e){}
+  const ordre = (dernier && modeles.includes(dernier)) ? [dernier, ...modeles.filter(m => m !== dernier)] : modeles;
   let lastErr = "";
-  for(const m of modeles){
+  for(const m of ordre){
     for(const avecModalites of [true, false]){
       try{
         const img = await callGeminiImageOnce(m, parts, avecModalites);
+        try{ localStorage.setItem(IMAGE_MODEL_STORE, m); }catch(e){}
         return { ...img, model: m };
       }catch(err){ lastErr = err.message || String(err); }
     }
@@ -1463,6 +1542,7 @@ $('btnVignette').onclick = async () => {
     const prompt = promptVignette($('titreMorceau').value.trim(), $('seoContexte').value.trim(), $('ficheStyle').value.trim());
     const img = await callGeminiImageChain(buildImageParts(prompt, []));
     box.appendChild(blocImage('Vignette YouTube', prompt, img));
+    state.visualsGenerated = true;
     status.innerHTML = '<span class="ok">Image générée.</span>';
   }catch(err){
     status.innerHTML = `<span class="bad">Échec : ${escHtml(err.message || String(err))}</span>`;
@@ -1500,6 +1580,7 @@ $('btnStoryboard').onclick = async () => {
       const img = await callGeminiImageChain(buildImageParts(prompt, refsSupp));
       const dataUrl = `data:${img.mime};base64,${img.data}`;
       state.storyboard[idx] = { label: nom, dataUrl };
+      state.visualsGenerated = true;
       box.appendChild(blocImage(nom, prompt, img, (nouvelleDataUrl) => {
         state.storyboard[idx] = { label: nom, dataUrl: nouvelleDataUrl };
         updateApercu();
@@ -1518,7 +1599,17 @@ $('btnStoryboard').onclick = async () => {
   }
   status.innerHTML = `<span class="ok">${ok}/${blocs.length} image(s) générée(s).</span>`;
   $('btnStoryboard').disabled = false;
+  $('btnTeleTout').style.display = ok ? 'inline-block' : 'none';
   updateApercu();
+};
+
+/* Téléchargements groupés, légèrement espacés : certains navigateurs
+   bloquent plusieurs déclenchements simultanés depuis un seul clic. */
+$('btnTeleTout').onclick = () => {
+  const items = state.storyboard.filter(Boolean);
+  items.forEach((item, i) => setTimeout(() => {
+    downloadDataUrl((i+1) + '-' + item.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.png', item.dataUrl);
+  }, i * 300));
 };
 
 /* ═══════════════════ 15. APERÇU ANIMÉ (onglet 8) ═══════════════════
@@ -1546,6 +1637,14 @@ function updateApercu(){
   if(item) img.src = item.dataUrl;
   sub.textContent = state.playingIndex >= 0 ? state.lines[state.playingIndex].text : '';
 }
+
+/* Les images générées (vignette/storyboard) ne sont jamais sauvées — elles
+   coûtent des appels API, se perdent silencieusement à un simple
+   rafraîchissement. On avertit plutôt que de laisser perdre du travail
+   payant sans y penser. */
+window.addEventListener('beforeunload', e => {
+  if(state.visualsGenerated){ e.preventDefault(); e.returnValue = ''; }
+});
 
 /* ═══════════════════ INIT ═══════════════════ */
 draftLoad();
