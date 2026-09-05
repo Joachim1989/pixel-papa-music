@@ -55,12 +55,18 @@ h1{font-family:var(--cond);font-weight:700;letter-spacing:.3px;font-size:26px;ma
 h2{font-family:var(--cond);font-weight:700;font-size:16px;letter-spacing:.5px;text-transform:uppercase;color:var(--gold);margin:0 0 10px}
 header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:14px}
 header p{margin:0;color:var(--text-muted);font-size:13px;max-width:60ch}
-.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
 .tab{background:var(--surface);border:1px solid var(--border);color:var(--text-muted);border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
 .tab:hover{color:var(--text);border-color:var(--gold-dim)}
 .tab.active{background:var(--gold);color:#161206;border-color:var(--gold)}
+.tab.done:not(.active)::after{content:"✓";margin-left:6px;color:var(--go);font-weight:700}
+#etapeProgres{font-size:12px;color:var(--text-muted);margin:0 0 16px;font-style:italic}
 .tabpanel{display:none}
 .tabpanel.active{display:block}
+.guide-etape{background:var(--surface);border:1px solid var(--gold-dim);border-left:4px solid var(--gold);border-radius:8px;padding:12px 14px;margin-bottom:14px}
+.guide-etape p{margin:0;font-size:13px;line-height:1.5}
+.guide-etape p + p{margin-top:6px}
+.etape-suivante{margin-top:18px;padding-top:14px;border-top:1px solid var(--border);text-align:right}
 .grid{display:grid;grid-template-columns:1fr;gap:16px}
 @media(min-width:960px){.grid{grid-template-columns:380px 1fr}}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
@@ -139,6 +145,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px
   <button class="tab" data-tab="visuels">7. Visuels</button>
   <button class="tab" data-tab="apercu">8. Aperçu</button>
 </nav>
+<p id="etapeProgres"></p>
 
 <!-- ═══════════════════ ONGLET 0 : ÉCRITURE (avant Suno) ═══════════════════
      PAS un générateur : l'écriture (angles, vérif rimes/minutage/prononciation)
@@ -445,7 +452,8 @@ const state = {
   playingIndex: -1, // ligne actuellement chantée d'après le calage existant (suivi de lecture)
   previewSectionIndex: -1, // section actuellement en cours, pour l'aperçu animé (onglet 8)
   storyboard: [], // [{label, dataUrl}] dans l'ordre des sections, rempli par "Générer le storyboard"
-  visualsGenerated: false // au moins une image générée cette session (jamais sauvée en localStorage, trop lourd) — avertit avant de fermer/rafraîchir
+  visualsGenerated: false, // au moins une image générée cette session (jamais sauvée en localStorage, trop lourd) — avertit avant de fermer/rafraîchir
+  etapesFaites: new Set() // ids d'onglets où une action concrète a déjà eu lieu, pour la coche ✓ dans la barre d'étapes
 };
 
 const $ = id => document.getElementById(id);
@@ -460,7 +468,73 @@ document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => {
   btn.classList.add('active');
   $('tab-' + btn.dataset.tab).classList.add('active');
   if(btn.dataset.tab === 'apercu') updateApercu();
+  renderStepper();
 });
+
+/* ═══════════════════ GUIDE PAS À PAS ═══════════════════
+   Une seule source pour le contenu pédagogique de chaque onglet : injecté
+   au chargement (initGuides) plutôt que dupliqué dans le HTML de chacun
+   des 9 panneaux — un texte à corriger une fois, pas neuf fois. */
+const GUIDE_ETAPES = [
+  { id:'ecriture', titre:'Écriture', pourquoi:"c'est le point de départ : le titre et les paroles de la chanson, avant même d'aller sur Suno.", comment:"écris avec Claude en conversation (il propose des angles, vérifie les rimes et le minutage), colle le résultat ci-dessous, puis clique pour l'envoyer à l'étape suivante." },
+  { id:'calage', titre:'Calage', pourquoi:"chaque ligne doit être associée au moment exact où elle est chantée — sans ça, impossible de faire des sous-titres, un karaoké ou des visuels qui suivent la musique.", comment:"charge l'audio, écoute, et appuie sur Entrée à chaque ligne (ou laisse l'IA dégrossir le travail, à corriger ensuite à l'oreille)." },
+  { id:'soustitres', titre:'Sous-titres', pourquoi:"pour que les spectateurs puissent lire les paroles en même temps qu'ils écoutent, sur YouTube ou les réseaux.", comment:"une fois le calage terminé (onglet précédent), télécharge le fichier .srt ou .vtt et importe-le dans ton logiciel de montage." },
+  { id:'karaoke', titre:'Karaoké', pourquoi:"pour un effet visuel où le texte se surligne en rythme — utile pour les vidéos où les paroles doivent « vivre » à l'écran.", comment:"choisis le mode (ligne entière ou mot par mot), télécharge le fichier .ass, importe-le comme les sous-titres." },
+  { id:'animation', titre:'Repères animation', pourquoi:"donne l'instant exact (en secondes) de chaque ligne et section, pour animer à la main sans réécouter au casque à chaque fois.", comment:"télécharge le fichier .json et ouvre-le comme repère pendant le montage ou l'animation." },
+  { id:'seo', titre:'Pack SEO / pub', pourquoi:"pour que la vidéo se trouve plus facilement sur YouTube (titre, description, tags) et se partage bien sur les réseaux (hashtags).", comment:"remplis le titre et le contexte (onglet Calage), clique générer, copie ce qui te plaît." },
+  { id:'hook', titre:'Hook / teaser', pourquoi:"pour savoir quel passage de la chanson utiliser dans un Short/Reel de 15-30 secondes, sans le chercher à l'oreille.", comment:"clique détecter, écoute l'extrait proposé, copie les instants si ça convient." },
+  { id:'visuels', titre:'Visuels', pourquoi:"pour avoir des images (vignette, décors) dans l'univers Pixel Papa sans savoir dessiner ni chercher ailleurs.", comment:"choisis un style (texte ou photo de référence), génère, télécharge — ou régénère si une scène ne plaît pas." },
+  { id:'apercu', titre:'Aperçu', pourquoi:"pour voir approximativement ce que donnera la vidéo avant de perdre du temps à monter pour de vrai.", comment:"lance la lecture depuis l'onglet Calage, reviens ici pour regarder les scènes défiler avec les paroles." }
+];
+
+function initGuides(){
+  GUIDE_ETAPES.forEach((etape, i) => {
+    const panel = $('tab-' + etape.id);
+    if(!panel) return;
+
+    const guide = document.createElement('div');
+    guide.className = 'guide-etape';
+    const pPourquoi = document.createElement('p');
+    pPourquoi.innerHTML = '<b>Pourquoi cette étape ?</b> ';
+    pPourquoi.append(etape.pourquoi);
+    const pComment = document.createElement('p');
+    pComment.innerHTML = '<b>Comment faire ?</b> ';
+    pComment.append(etape.comment);
+    guide.append(pPourquoi, pComment);
+    panel.insertBefore(guide, panel.firstChild);
+
+    const suivante = GUIDE_ETAPES[i + 1];
+    if(suivante){
+      const nav = document.createElement('div');
+      nav.className = 'etape-suivante';
+      const btn = document.createElement('button');
+      btn.className = 'primary';
+      btn.textContent = `Étape suivante : ${suivante.titre} →`;
+      btn.onclick = () => document.querySelector(`.tab[data-tab="${suivante.id}"]`).click();
+      nav.appendChild(btn);
+      panel.appendChild(nav);
+    }
+  });
+}
+
+/* Coche ✓ sur les onglets où une action concrète a déjà eu lieu (pas juste
+   visités) + phrase de repère sous la barre d'onglets ("Étape X sur 9"). */
+function marquerFaite(id){
+  if(state.etapesFaites.has(id)) return;
+  state.etapesFaites.add(id);
+  renderStepper();
+}
+function renderStepper(){
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.classList.toggle('done', state.etapesFaites.has(btn.dataset.tab));
+  });
+  const activeId = document.querySelector('.tab.active')?.dataset.tab;
+  const idx = GUIDE_ETAPES.findIndex(e => e.id === activeId);
+  const el = $('etapeProgres');
+  if(el && idx >= 0){
+    el.textContent = `Étape ${idx + 1} sur ${GUIDE_ETAPES.length} — ${GUIDE_ETAPES[idx].titre} : ${GUIDE_ETAPES[idx].pourquoi}`;
+  }
+}
 
 /* ═══════════════════ 0. ÉCRITURE (avant Suno) ═══════════════════ */
 const CHECKLIST_SUNO = [
@@ -496,6 +570,7 @@ $('btnEnvoyerCalage').onclick = () => {
   $('paroles').value = paroles;
   draftSave();
   $('btnDecouper').click();
+  marquerFaite('ecriture');
   document.querySelector('.tab[data-tab="calage"]').click();
   status.innerHTML = '<span class="ok">Envoyé — tu es maintenant sur l\'onglet Calage, charge l\'audio téléchargé depuis Suno.</span>';
 };
@@ -950,6 +1025,7 @@ function render(){
   const timeable = state.lines.filter(l => l.type === 'line');
   const done = timeable.filter(l => l.start != null).length;
   const complete = timeable.length > 0 && done === timeable.length;
+  if(complete) marquerFaite('calage');
   const txtStatut = timeable.length
     ? (complete
         ? `<span class="ok">${done}/${timeable.length} lignes calées — prêt à exporter.</span>`
@@ -994,8 +1070,8 @@ function buildVTT(){
   const lines = state.lines.filter(l => l.type === 'line' && l.start != null);
   return "WEBVTT\n\n" + lines.map((l,i) => `${i+1}\n${fmtTime(l.start,'.')} --> ${fmtTime(l.end,'.')}\n${l.text}\n`).join("\n");
 }
-$('btnSRT').onclick = () => download("sous-titres.srt", buildSRT(), "application/x-subrip");
-$('btnVTT').onclick = () => download("sous-titres.vtt", buildVTT(), "text/vtt");
+$('btnSRT').onclick = () => { download("sous-titres.srt", buildSRT(), "application/x-subrip"); marquerFaite('soustitres'); };
+$('btnVTT').onclick = () => { download("sous-titres.vtt", buildVTT(), "text/vtt"); marquerFaite('soustitres'); };
 $('btnCopySRT').onclick = async () => {
   try{ await navigator.clipboard.writeText(buildSRT()); $('btnCopySRT').textContent = "Copié ✓"; setTimeout(() => $('btnCopySRT').textContent = "Copier le .srt", 1500); }
   catch(e){ alert("Impossible de copier automatiquement — sélectionne dans le fichier téléchargé."); }
@@ -1066,6 +1142,7 @@ $('btnASS').onclick = () => {
   const mode = $('assMode').value;
   const taille = parseInt($('assTaille').value, 10) || 72;
   download("karaoke.ass", buildASS(mode, taille), "text/plain");
+  marquerFaite('karaoke');
 };
 
 /* ═══════════════════ 10. REPÈRES SECTION (partagés animation + SEO) ═══════════════════
@@ -1101,7 +1178,7 @@ function buildAnimJSON(){
     lignes
   }, null, 2);
 }
-$('btnJSON').onclick = () => download("reperes-animation.json", buildAnimJSON(), "application/json");
+$('btnJSON').onclick = () => { download("reperes-animation.json", buildAnimJSON(), "application/json"); marquerFaite('animation'); };
 
 /* ═══════════════════ 12. PACK SEO / PUB (onglet 5) ═══════════════════ */
 const SEO_SCHEMA = {
@@ -1223,6 +1300,7 @@ Ne mentionne AUCUN horodatage ni minutage : les chapitres sont ajoutés séparé
     description += "\n\n" + (data.description_outro || "").trim();
 
     renderSEOResult(data, chapitres, description.trim());
+    marquerFaite('seo');
     status.innerHTML = '<span class="ok">Pack généré.</span>'
       + (chapitres.length ? '' : ' <span class="warn">Chapitres non inclus — il faut au moins 3 balises [Refrain]/[Couplet] avec des lignes calées, espacées d\'au moins 10s.</span>');
   }catch(err){
@@ -1290,6 +1368,7 @@ $('btnHook').onclick = () => {
   const end = Math.min(dur, h.lignes[h.lignes.length-1].end + postRoll);
 
   status.innerHTML = `<span class="ok">Trouvé via ${h.source === 'balise' ? 'la balise ' + escHtml(h.label) : 'une répétition de lignes'}.</span>`;
+  marquerFaite('hook');
 
   const card = document.createElement('div');
   card.className = 'card nested';
@@ -1542,7 +1621,7 @@ $('btnVignette').onclick = async () => {
     const prompt = promptVignette($('titreMorceau').value.trim(), $('seoContexte').value.trim(), $('ficheStyle').value.trim());
     const img = await callGeminiImageChain(buildImageParts(prompt, []));
     box.appendChild(blocImage('Vignette YouTube', prompt, img));
-    state.visualsGenerated = true;
+    state.visualsGenerated = true; marquerFaite('visuels');
     status.innerHTML = '<span class="ok">Image générée.</span>';
   }catch(err){
     status.innerHTML = `<span class="bad">Échec : ${escHtml(err.message || String(err))}</span>`;
@@ -1580,7 +1659,7 @@ $('btnStoryboard').onclick = async () => {
       const img = await callGeminiImageChain(buildImageParts(prompt, refsSupp));
       const dataUrl = `data:${img.mime};base64,${img.data}`;
       state.storyboard[idx] = { label: nom, dataUrl };
-      state.visualsGenerated = true;
+      state.visualsGenerated = true; marquerFaite('visuels');
       box.appendChild(blocImage(nom, prompt, img, (nouvelleDataUrl) => {
         state.storyboard[idx] = { label: nom, dataUrl: nouvelleDataUrl };
         updateApercu();
@@ -1647,9 +1726,11 @@ window.addEventListener('beforeunload', e => {
 });
 
 /* ═══════════════════ INIT ═══════════════════ */
+initGuides();
 draftLoad();
 render();
 updateApercu();
+renderStepper();
 </script>
 </body>
 </html>
