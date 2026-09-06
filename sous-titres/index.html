@@ -617,14 +617,19 @@ const CHECKLIST_SUNO = [
    un aller simple, sans le choix d'angle ni les allers-retours de contrôle
    qualité du skill conversationnel. D'où le bouton "Utiliser ce texte" plutôt
    qu'un envoi automatique : on relit avant de s'engager. */
+/* Retour de terrain : le modèle regroupait tout (titre + style + paroles)
+   dans le seul champ "titre", malgré le schéma. "type: STRING" tout seul ne
+   dit rien sur le CONTENU attendu par champ — la description explicite en
+   dit beaucoup plus au modèle qu'un commentaire dans le prompt. */
 const GENERATION_SCHEMA = {
   type: "OBJECT",
   properties: {
-    titre: { type: "STRING" },
-    style_field: { type: "STRING" },
-    lyrics_field: { type: "STRING" },
-    notes: { type: "STRING" }
-  }
+    titre: { type: "STRING", description: "UNIQUEMENT le titre du morceau, quelques mots. Rien d'autre : ni style, ni paroles, ni guillemets." },
+    style_field: { type: "STRING", description: "UNIQUEMENT le champ Style Suno (descripteurs séparés par des virgules). Ne contient ni le titre ni les paroles." },
+    lyrics_field: { type: "STRING", description: "UNIQUEMENT les paroles avec leurs metatags de structure. Ne contient ni le titre ni les descripteurs de style." },
+    notes: { type: "STRING", description: "UNIQUEMENT les rappels avant Suno, 2 à 3 phrases. Ne contient ni le titre, ni le style, ni les paroles." }
+  },
+  required: ["titre", "style_field", "lyrics_field", "notes"]
 };
 const STRUCTURES_LONGUEUR = {
   "2m30": "Structure : Intro 4 + Couplet 16 + Refrain 8 + Couplet 16 + Refrain 8 + Outro 4 (~55 bars). Volontairement DEUX couplets seulement pour cette durée — ne pas en ajouter un troisième.",
@@ -681,6 +686,8 @@ FORMAT DE LIVRAISON (obligatoire, JSON) :
     ? "le champ Lyrics Suno — mode INSTRUMENTAL : aucune parole chantée, UNIQUEMENT des metatags de structure entre crochets en anglais (ex. [Intro], [Theme A], [Build], [Instrumental Break], [Climax], [Outro]), terminé OBLIGATOIREMENT par [End]."
     : 'le champ Lyrics Suno — paroles en FRANÇAIS, avec des metatags de structure EN ANGLAIS entre crochets (ex. [Verse 1: sparse piano, brushed drums], [Chorus: full arrangement, sung melodic vocals], [Bridge], [Outro]), respectant la structure demandée plus haut. Écris les chiffres en toutes lettres et les sigles séparés par des tirets (ex. "P-S-deux", pas "PS2"). Termine OBLIGATOIREMENT par la ligne [End].'}
 - "notes" : 2 à 3 phrases de rappel — points à vérifier avant de coller dans Suno (réglages de sliders, prononciation à tester, Prompt Enhancement Helper à désactiver...).
+
+CES QUATRE CHAMPS SONT INDÉPENDANTS ET NE SE CHEVAUCHENT JAMAIS : le champ "titre" ne contient QUE le titre (quelques mots, jamais les paroles ni le style) ; le champ "style_field" ne contient QUE les descripteurs ; le champ "lyrics_field" ne contient QUE les paroles. Ne mets JAMAIS l'intégralité de la réponse dans un seul champ.
 
 Ne mentionne aucun nom d'artiste réel, nulle part dans la réponse.`;
 }
@@ -746,6 +753,16 @@ $('btnGenererTexte').onclick = async () => {
   $('btnGenererTexte').disabled = true;
   try{
     const data = await callGeminiChain([{ text: promptGenerationTexte() }], GENERATION_SCHEMA);
+    // Retour de terrain : malgré le schéma, le modèle a parfois tout
+    // regroupé dans "titre" en laissant les autres champs vides — un titre
+    // ne dépasse normalement jamais une centaine de caractères. Mieux vaut
+    // refuser d'afficher un résultat mal réparti que de montrer un bloc de
+    // texte confus dans une case "Titre".
+    const titreTropLong = (data.titre || "").length > 150;
+    const champsVides = !(data.style_field || "").trim() || !(data.lyrics_field || "").trim();
+    if(titreTropLong && champsVides){
+      throw new Error("La réponse n'a pas respecté le format demandé (tout regroupé dans un seul champ) — réessaie, ça arrive occasionnellement.");
+    }
     renderGenResult(data);
     status.innerHTML = '<span class="ok">Premier jet généré.</span> Relis-le et corrige avant Suno — c\'est un aller simple, sans le contrôle qualité d\'une écriture en conversation.';
   }catch(err){
