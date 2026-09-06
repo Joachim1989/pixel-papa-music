@@ -1148,6 +1148,13 @@ async function callGemini(model, parts, schema){
   const g3 = /^gemini-3/.test(model || "");
   const generationConfig = { responseMimeType: "application/json", responseSchema: schema };
   generationConfig.thinkingConfig = g3 ? { thinkingLevel: "low" } : { thinkingBudget: 0 };
+  // Chez Gemini 3, les jetons de réflexion sont décomptés du MÊME budget que
+  // la réponse (maxOutputTokens) — même avec thinkingLevel "low" au lieu de
+  // zéro. Sans compenser, le budget par défaut se fait grignoter par la
+  // réflexion et la réponse est coupée en plein vol (titre présent, Style et
+  // Lyrics vides : exactement le retour de terrain après le correctif
+  // précédent). Même compensation que buildBody() dans l'appli Insert Coin.
+  generationConfig.maxOutputTokens = g3 ? 10000 : 4000;
   const res = await fetchAvecDelai(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
@@ -1164,9 +1171,14 @@ async function callGemini(model, parts, schema){
   const cand = (data.candidates || [])[0];
   if(!cand) throw new Error(data.promptFeedback?.blockReason || "Réponse vide");
   const raw = ((cand.content && cand.content.parts) || []).map(p => p.text || "").join("");
+  // Vérifié AVANT le parsing tolérant, pas seulement en repli : jsonRepare()
+  // peut "réussir" à recomposer un objet valide à partir d'une réponse
+  // tronquée (les champs déjà écrits avant la coupure) — un titre présent
+  // avec Style et Lyrics vides n'est pas un succès, c'est une troncature
+  // déguisée en réponse complète. Mieux vaut échouer franchement.
+  if(cand.finishReason === "MAX_TOKENS") throw new Error("Réponse tronquée (budget de jetons dépassé) — réessaie, ou raccourcis la demande.");
   const parsed = jsonRepare(raw);
   if(parsed) return parsed;
-  if(cand.finishReason === "MAX_TOKENS") throw new Error("Réponse tronquée (budget de jetons dépassé) — réessaie, ou raccourcis la demande.");
   throw new Error("Réponse illisible (JSON invalide malgré la consigne).");
 }
 
@@ -1533,8 +1545,22 @@ function copyBtn(label, texte){
   b.className = 'small mini';
   b.textContent = label;
   b.onclick = async () => {
-    try{ await navigator.clipboard.writeText(texte); b.textContent = 'Copié ✓'; setTimeout(() => b.textContent = label, 1500); }
-    catch(e){ alert('Impossible de copier automatiquement.'); }
+    if(!String(texte || '').trim()){ alert('Rien à copier — ce champ est vide.'); return; }
+    try{
+      await navigator.clipboard.writeText(texte);
+    }catch(e){
+      // navigator.clipboard exige un contexte "sécurisé" — absent sur
+      // certaines pages ouvertes en local (content://, vieux navigateurs) :
+      // repli sur l'ancienne méthode plutôt qu'un échec silencieux.
+      try{
+        const ta = document.createElement('textarea');
+        ta.value = texte; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }catch(e2){ alert('Impossible de copier automatiquement — sélectionne le texte à la main.'); return; }
+    }
+    b.textContent = 'Copié ✓'; setTimeout(() => b.textContent = label, 1500);
   };
   return b;
 }
