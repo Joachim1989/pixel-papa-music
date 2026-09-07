@@ -2351,20 +2351,61 @@ function dessinerFrameExport(ctx, canvas){
       }
     }
   }
-  const li = state.playingIndex;
-  if(li >= 0 && state.lines[li] && state.lines[li].type === 'line'){
-    const texte = state.lines[li].text;
-    const taille = Math.round(canvas.height * 0.045);
-    ctx.font = `700 ${taille}px ${FONT_COND_STACK}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    const y = canvas.height - canvas.height * 0.035;
-    const largeur = ctx.measureText(texte).width;
-    ctx.fillStyle = 'rgba(0,0,0,.55)';
-    ctx.fillRect(canvas.width / 2 - largeur / 2 - 24, y - taille - 12, largeur + 48, taille + 30);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(texte, canvas.width / 2, y);
+  dessinerSousTitreExport(ctx, canvas);
+}
+
+/* Retour de terrain : en 9:16, le sous-titre débordait des DEUX côtés du
+   cadre — "regarde les sous titres en mode portrait, cela ne va pas".
+   Cause double : (1) le texte était dessiné sur une seule ligne, sans
+   jamais revenir à la ligne, et (2) sa taille était calculée à partir de
+   la HAUTEUR du canvas — presque deux fois plus grande que la largeur en
+   portrait, donc une police bien trop grosse pour le cadre disponible. On
+   calcule maintenant la taille à partir de la plus PETITE dimension, et on
+   découpe le texte sur plusieurs lignes (avec repli sur une police encore
+   plus petite si un mot isolé dépasse quand même). */
+function decouperTexteCanvas(ctx, texte, largeurMax){
+  const mots = texte.split(' ');
+  const lignes = [];
+  let ligne = '';
+  for(const mot of mots){
+    const essai = ligne ? ligne + ' ' + mot : mot;
+    if(ligne && ctx.measureText(essai).width > largeurMax){
+      lignes.push(ligne);
+      ligne = mot;
+    } else {
+      ligne = essai;
+    }
   }
+  if(ligne) lignes.push(ligne);
+  return lignes;
+}
+function dessinerSousTitreExport(ctx, canvas){
+  const li = state.playingIndex;
+  if(li < 0 || !state.lines[li] || state.lines[li].type !== 'line') return;
+  const texte = state.lines[li].text;
+  const largeurMax = canvas.width * 0.88;
+  let taille = Math.round(Math.min(canvas.width, canvas.height) * 0.06);
+  const TAILLE_MIN = 14;
+  let lignesTexte;
+  do{
+    ctx.font = `700 ${taille}px ${FONT_COND_STACK}`;
+    lignesTexte = decouperTexteCanvas(ctx, texte, largeurMax);
+    const tropLarge = lignesTexte.some(l => ctx.measureText(l).width > largeurMax);
+    if(!tropLarge || taille <= TAILLE_MIN) break;
+    taille -= 2;
+  }while(true);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  const interligne = taille * 1.18;
+  const yDerniereLigne = canvas.height - canvas.height * 0.035;
+  const yPremiereLigne = yDerniereLigne - (lignesTexte.length - 1) * interligne;
+  const largeurBloc = Math.min(largeurMax, Math.max(...lignesTexte.map(l => ctx.measureText(l).width)));
+  const hauteurBloc = (lignesTexte.length - 1) * interligne + taille + 30;
+  ctx.fillStyle = 'rgba(0,0,0,.55)';
+  ctx.fillRect(canvas.width / 2 - largeurBloc / 2 - 24, yPremiereLigne - taille - 12, largeurBloc + 48, hauteurBloc);
+  ctx.fillStyle = '#fff';
+  lignesTexte.forEach((ligne, i) => ctx.fillText(ligne, canvas.width / 2, yPremiereLigne + i * interligne));
 }
 
 let exportVideoEnCours = false;
