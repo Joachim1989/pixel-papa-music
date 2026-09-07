@@ -29,22 +29,29 @@ travail :
    tags, hashtags.
 6. **Hook / teaser** — repère le refrain (balise ou répétition) et
    propose une fenêtre de clip courte pour Shorts/Reels.
-7. **Visuels** — vignette YouTube + storyboard (une image par section,
-   numérotée quand une balise revient plusieurs fois — ex. "Refrain
-   1/2" — pour que chaque scène colle aux paroles EXACTES de son
-   occurrence, pas un mélange des deux), générés directement (Gemini).
-   Style calé sur une fiche éditable ou extrait d'une image de référence
-   (transfert de style/personnage, comme le skill
-   `style-transfer-portrait`) ; chaque scène est régénérable (prompt
-   éditable) ; cohérence de personnage d'une scène à l'autre via
-   chaînage ; format 16:9/9:16/1:1 au choix.
+7. **Visuels** — vignette YouTube + storyboard **en deux étapes** :
+   d'abord un plan de scènes (appel texte qui lit la chanson ENTIÈRE,
+   comprend l'histoire racontée et propose, section par section — chaque
+   occurrence numérotée si une balise revient, ex. "Refrain 1/2" — une
+   scène cohérente avec les scènes voisines : personnage, décor, objets
+   qui reviennent ou évoluent logiquement), relisible et modifiable
+   avant de dépenser des générations d'image ; puis les images
+   elles-mêmes (Gemini), une par scène du plan. Style calé sur une fiche
+   éditable ou extrait d'une image de référence (transfert de
+   style/personnage, comme le skill `style-transfer-portrait`) ; chaque
+   scène est régénérable (prompt éditable) ; cohérence de personnage
+   d'une scène à l'autre via chaînage ; format 16:9/9:16/1:1 au choix,
+   réellement respecté (paramètre d'API `imageConfig.aspectRatio`, pas
+   qu'une phrase dans le prompt).
 8. **Aperçu** — previz dans le navigateur (images du storyboard
    enchaînées au bon timing avec les sous-titres par-dessus, pour valider
-   le rythme) **+ export vidéo animée** : anime les images (zoom continu
-   façon Ken Burns), incruste les sous-titres et enregistre le tout avec
-   l'audio réel via MediaRecorder — un vrai fichier `.webm` téléchargé,
-   généré entièrement dans le navigateur. Brouillon utilisable tel quel
-   ou base à reprendre dans CapCut/VN/Canva pour un montage plus abouti.
+   le rythme) **+ export vidéo animée** : anime les images (zoom marqué +
+   travellings qui alternent de scène en scène, fondu enchaîné entre les
+   scènes plutôt qu'un cut sec), incruste les sous-titres et enregistre
+   le tout avec l'audio réel via MediaRecorder — un vrai fichier `.webm`
+   téléchargé, généré entièrement dans le navigateur. Brouillon
+   utilisable tel quel ou base à reprendre dans CapCut/VN/Canva pour un
+   montage plus abouti.
 
 ## Choix d'architecture qui comptent
 

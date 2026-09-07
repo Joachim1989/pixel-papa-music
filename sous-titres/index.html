@@ -465,8 +465,11 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
 
   <div class="card" style="max-width:640px">
     <h2>Storyboard par section</h2>
-    <p class="hint">Une image par section détectée dans les paroles ([Couplet]/[Refrain]/[Pont]...) — pour poser les décors d'un montage animé sans partir de zéro. Génère les images une par une (peut prendre un moment sur une chanson à beaucoup de sections).</p>
-    <div class="row"><button id="btnStoryboard" class="primary">Générer le storyboard</button><button id="btnTeleTout" class="small ghost" style="display:none">Tout télécharger</button></div>
+    <p class="hint">En deux étapes, comme un vrai storyboard de tournage : d'abord un PLAN de scènes qui comprend l'histoire globale de la chanson et assure une continuité (personnage, décor, objets) d'une section à l'autre — à relire et corriger avant de dépenser des générations d'image — puis les images elles-mêmes, une par section détectée ([Couplet]/[Refrain]/[Pont]...).</p>
+    <div class="row"><button id="btnPlanStoryboard" class="primary">1. Générer le plan de scènes</button></div>
+    <div class="status" id="planStatus"></div>
+    <div id="planResult"></div>
+    <div class="row" style="margin-top:14px"><button id="btnStoryboard" class="primary" disabled>2. Générer les images du storyboard</button><button id="btnTeleTout" class="small ghost" style="display:none">Tout télécharger</button></div>
     <div class="status" id="storyboardStatus"></div>
     <div id="storyboardResult"></div>
   </div>
@@ -1785,13 +1788,22 @@ async function modelesImageDisponibles(){
   return imageModelsCache;
 }
 
-async function callGeminiImageOnce(model, requestParts, avecModalites){
+async function callGeminiImageOnce(model, requestParts, avecModalites, aspectRatio){
   const key = $('geminiKey').value.trim();
   const body = { contents: [{ role: "user", parts: requestParts }] };
   // Certains modèles (générations "preview") exigent responseModalities
   // pour renvoyer une image, d'autres le refusent en 400 : on tente les
-  // deux formes plutôt que de deviner.
-  if(avecModalites) body.generationConfig = { responseModalities: ["TEXT", "IMAGE"] };
+  // deux formes plutôt que de deviner. Le format (16:9/9:16/1:1) était
+  // avant UNIQUEMENT une phrase dans le prompt texte — le modèle l'ignore
+  // superbement (retour de terrain : "j'ai demandé du 9:16 TikTok, mes
+  // images sont en horizontal"). imageConfig.aspectRatio est le vrai
+  // paramètre d'API pour ça ; on ne le pousse que quand generationConfig
+  // est déjà présent (avecModalites), et le chaînage ci-dessous retente
+  // sans si un modèle refuse le champ en 400.
+  if(avecModalites){
+    body.generationConfig = { responseModalities: ["TEXT", "IMAGE"] };
+    if(aspectRatio) body.generationConfig.imageConfig = { aspectRatio };
+  }
   const res = await fetchAvecDelai(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
@@ -1812,7 +1824,7 @@ async function callGeminiImageOnce(model, requestParts, avecModalites){
 
 const IMAGE_MODEL_STORE = "pixelpapa.subtitles.gemini.imagemodel";
 
-async function callGeminiImageChain(parts){
+async function callGeminiImageChain(parts, aspectRatio){
   const modeles = await modelesImageDisponibles();
   // Le modèle qui a marché la dernière fois est retenté EN PREMIER : sans ça,
   // chaque scène du storyboard repart de zéro dans la liste (jusqu'à
@@ -1821,10 +1833,14 @@ async function callGeminiImageChain(parts){
   let dernier = null; try{ dernier = localStorage.getItem(IMAGE_MODEL_STORE); }catch(e){}
   const ordre = (dernier && modeles.includes(dernier)) ? [dernier, ...modeles.filter(m => m !== dernier)] : modeles;
   let lastErr = "";
+  // On tente d'abord le format demandé via l'API (imageConfig), puis sans
+  // lui si le modèle le refuse en 400 — certains modèles image plus anciens
+  // ne connaissent pas ce champ.
+  const variantes = aspectRatio ? [[true, aspectRatio], [true, null], [false, null]] : [[true, null], [false, null]];
   for(const m of ordre){
-    for(const avecModalites of [true, false]){
+    for(const [avecModalites, ar] of variantes){
       try{
-        const img = await callGeminiImageOnce(m, parts, avecModalites);
+        const img = await callGeminiImageOnce(m, parts, avecModalites, ar);
         try{ localStorage.setItem(IMAGE_MODEL_STORE, m); }catch(e){}
         return { ...img, model: m };
       }catch(err){ lastErr = err.message || String(err); }
@@ -1944,15 +1960,53 @@ function buildImageParts(promptTexte, referencesSupp){
   return parts;
 }
 
-function promptVisuelSection(label, lignes, styleSheet){
+/* ═══════════════════ PLAN DE STORYBOARD (texte, avant les images) ═══════════════════
+   Retour de terrain : générer chaque image indépendamment à partir des seules
+   paroles de SA section produit des scènes qui ne racontent rien ensemble —
+   "les photos n'ont aucun sens". Un vidéaste ne part pas image par image : il
+   lit toute l'histoire, puis planifie une suite de plans cohérents. On fait
+   pareil ici en deux temps : un appel texte lit la chanson ENTIÈRE et propose,
+   section par section, une scène concrète qui tient compte de l'arc narratif
+   global ET des scènes voisines (mêmes décor/objets/personnage qui peuvent
+   revenir ou évoluer) — relisible et modifiable AVANT de dépenser des
+   générations d'image, qui coûtent plus cher et sont plus lentes à corriger. */
+const STORYBOARD_PLAN_SCHEMA = {
+  type: "ARRAY",
+  items: {
+    type: "OBJECT",
+    properties: {
+      section: { type: "STRING", description: "Nom exact de la section, identique à celui fourni (ex. \"Refrain 1/2\")." },
+      resume: { type: "STRING", description: "Une phrase : ce que racontent concrètement les paroles de cette section (qui fait quoi, où)." },
+      scene: { type: "STRING", description: "Description visuelle détaillée de LA scène à illustrer pour cette section : action précise, décor, cadrage — cohérente avec l'histoire globale et les scènes voisines (continuité de personnage, de décor, d'objets)." }
+    },
+    required: ["section", "resume", "scene"]
+  }
+};
+
+function promptPlanStoryboard(titre, blocs, styleSheet, aReference){
+  const sections = blocs.map(b => `--- ${b.nom} ---\n${b.lignes.map(l => l.text).join('\n')}`).join('\n\n');
+  return `Tu es vidéaste et storyboarder pour une chanson Pixel Papa${titre ? ` intitulée "${titre}"` : ''}.
+
+Voici les paroles COMPLÈTES, dans l'ordre de la chanson :
+${sections}
+${styleSheet ? `\nStyle visuel de la chanson : ${styleSheet}\n` : ''}${aReference ? "\nUn ou plusieurs personnages de référence (photo) illustreront chaque scène : garde-le(s) reconnaissable(s) et cohérent(s) d'une scène à l'autre.\n" : ''}
+Ta tâche : d'abord comprendre l'HISTOIRE que raconte cette chanson dans son ensemble — qui est le personnage, ce qui lui arrive, comment ça évolue du début à la fin — puis, pour CHAQUE section listée ci-dessus (dans le même ordre, avec le même nom exact), décrire UNE scène concrète à illustrer :
+- Elle doit correspondre PRÉCISÉMENT à ce que racontent les paroles de CETTE section — pas une ambiance générale de la chanson, pas le contenu d'une autre section.
+- Elle doit s'inscrire dans une VRAIE CONTINUITÉ visuelle avec les scènes voisines : même personnage, même univers, un décor ou des objets qui peuvent se retrouver ou évoluer logiquement d'une scène à l'autre — jamais une suite d'images déconnectées les unes des autres, comme les plans d'un même court-métrage.
+- Une vraie scène avec de l'action (un geste, un mouvement, une interaction) — jamais un simple portrait statique.
+
+Réponds avec UNE entrée par section, dans le même ordre, en reprenant exactement les noms de section fournis.`;
+}
+
+function promptSceneStoryboard(label, sceneDesc, styleSheet){
   return `${styleSheet}
 
-Voici les paroles EXACTES de la section "${label}" (dans l'ordre de la chanson) :
-${lignes.map(l => l.text).join('\n')}
+Scène à illustrer (section "${label}" d'une chanson Pixel Papa, prévue dans un plan de storyboard cohérent avec le reste de l'histoire racontée) :
+${sceneDesc}
 
-Avant de dessiner, repère CONCRÈTEMENT ce que CES lignes précises racontent à ce moment de la chanson (qui fait quoi, où, avec quel geste ou quel objet) — puis illustre PRÉCISÉMENT cette action-là, et seulement elle. N'illustre pas une ambiance générale de la chanson ni le contenu d'une autre section : la scène doit correspondre spécifiquement à ce que disent CES paroles-ci, dans ce style. Une vraie scène avec de l'action (pas un portrait ni un plan statique). Ne reproduis AUCUN texte ni lettre dans l'image.
+Une vraie scène avec de l'action, dans ce style. Ne reproduis AUCUN texte ni lettre dans l'image.
 
-Cette scène doit être visuellement DISTINCTE des autres scènes du storyboard (cadrage, pose et décor différents), même si le personnage reste reconnaissable. Format ${formatChoisi()}, une seule scène cohérente, sans texte ni lettres visibles dans l'image.`;
+Cette scène doit être visuellement DISTINCTE des autres scènes du storyboard (cadrage, pose et décor différents), même si le personnage et l'univers restent reconnaissables et cohérents avec le reste de l'histoire. Format ${formatChoisi()}, une seule scène cohérente, sans texte ni lettres visibles dans l'image.`;
 }
 function promptVignette(titre, contexte, styleSheet){
   return `${styleSheet}
@@ -2004,7 +2058,7 @@ function blocImage(titre, promptTexte, img, onRegenerate){
     btnRegen.disabled = true; btnRegen.textContent = 'Génération…';
     try{
       const nouveauPrompt = pre.value.trim();
-      const nouvelleImg = await callGeminiImageChain(buildImageParts(nouveauPrompt));
+      const nouvelleImg = await callGeminiImageChain(buildImageParts(nouveauPrompt), $('formatImage').value);
       imageEl.src = `data:${nouvelleImg.mime};base64,${nouvelleImg.data}`;
       statut.textContent = `Généré via ${nouvelleImg.model}.`;
       if(onRegenerate) onRegenerate(imageEl.src);
@@ -2028,7 +2082,7 @@ $('btnVignette').onclick = async () => {
   $('btnVignette').disabled = true;
   try{
     const prompt = promptVignette($('titreMorceau').value.trim(), $('seoContexte').value.trim(), $('ficheStyle').value.trim());
-    const img = await callGeminiImageChain(buildImageParts(prompt, []));
+    const img = await callGeminiImageChain(buildImageParts(prompt, []), $('formatImage').value);
     box.appendChild(blocImage('Vignette YouTube', prompt, img));
     state.visualsGenerated = true; marquerFaite('visuels');
     status.innerHTML = '<span class="ok">Image générée.</span>';
@@ -2039,24 +2093,19 @@ $('btnVignette').onclick = async () => {
   }
 };
 
-$('btnStoryboard').onclick = async () => {
-  const status = $('storyboardStatus'), box = $('storyboardResult');
-  const key = $('geminiKey').value.trim();
-  if(!key){ status.innerHTML = '<span class="bad">Colle ta clé API Gemini (onglet 1, carte 3).</span>'; return; }
-
+/* Une même balise ([Refrain] surtout) revient plusieurs fois dans une
+   chanson : sans numérotation, deux scènes différentes s'appellent toutes
+   les deux juste "Refrain", aussi bien dans le titre de la carte que dans
+   le plan et le prompt envoyés au modèle — qui n'a alors aucun moyen de
+   savoir laquelle des occurrences illustrer. On numérote donc chaque
+   occurrence par rapport aux autres du même nom (ex. "Refrain 1/2").
+   Partagé entre le plan (étape 1) et la génération d'images (étape 2) pour
+   qu'ils découpent toujours les paroles exactement pareil. */
+function construireBlocsSections(){
   const blocs = []; let label = null, buf = [];
   const flush = () => { if(buf.length) blocs.push({ label, lignes: buf }); buf = []; };
   state.lines.forEach(l => { if(l.type === 'section'){ flush(); label = l.text; } else buf.push(l); });
   flush();
-  if(!blocs.length){ status.innerHTML = '<span class="bad">Ajoute des paroles avec des balises [Couplet]/[Refrain] (onglet 1) — le storyboard s\'appuie dessus pour découper les scènes.</span>'; return; }
-
-  // Une même balise ([Refrain] surtout) revient plusieurs fois dans une
-  // chanson : sans numérotation, deux scènes différentes s'appellent toutes
-  // les deux juste "Refrain", aussi bien dans le titre de la carte que dans
-  // le prompt envoyé au modèle — qui n'a alors aucun moyen de savoir
-  // laquelle des occurrences illustrer. C'est une des causes du retour
-  // "ça n'a pas l'air de suivre la logique des textes" : on numérote donc
-  // chaque occurrence par rapport aux autres du même nom (ex. "Refrain 1/2").
   const totalParLabel = {};
   blocs.forEach(b => { const k = b.label || 'Intro'; totalParLabel[k] = (totalParLabel[k] || 0) + 1; });
   const vus = {};
@@ -2065,23 +2114,88 @@ $('btnStoryboard').onclick = async () => {
     vus[k] = (vus[k] || 0) + 1;
     b.nom = totalParLabel[k] > 1 ? `${k} ${vus[k]}/${totalParLabel[k]}` : k;
   });
+  return blocs;
+}
+
+// [{ nom, lignes, resume, scene, sceneEl }] une fois le plan généré (étape 1) —
+// sceneEl pointe vers le textarea éditable, lu au moment de l'étape 2 pour
+// que les corrections de l'utilisateur soient bien prises en compte.
+let planActuel = null;
+
+$('btnPlanStoryboard').onclick = async () => {
+  const status = $('planStatus'), box = $('planResult');
+  const key = $('geminiKey').value.trim();
+  if(!key){ status.innerHTML = '<span class="bad">Colle ta clé API Gemini (onglet 1, carte 3).</span>'; return; }
+  const blocs = construireBlocsSections();
+  if(!blocs.length){ status.innerHTML = '<span class="bad">Ajoute des paroles avec des balises [Couplet]/[Refrain] (onglet 1) — le plan s\'appuie dessus pour découper les scènes.</span>'; return; }
+
+  box.innerHTML = '';
+  planActuel = null;
+  $('btnStoryboard').disabled = true;
+  $('btnPlanStoryboard').disabled = true;
+  status.innerHTML = "Lecture de la chanson entière et construction du plan…";
+  try{
+    const titre = $('titreMorceau').value.trim();
+    const style = $('ficheStyle').value.trim();
+    const aReference = refImages.length > 0;
+    const prompt = promptPlanStoryboard(titre, blocs, style, aReference);
+    const plan = await callGeminiChain([{ text: prompt }], STORYBOARD_PLAN_SCHEMA);
+    if(!Array.isArray(plan) || !plan.length) throw new Error("Réponse vide ou mal formée — réessaie.");
+
+    // On recale chaque entrée sur le bon bloc par le nom de section renvoyé
+    // (au cas où le modèle changerait l'ordre) ; à défaut, sur la position.
+    planActuel = blocs.map((bloc, i) => {
+      const trouve = plan.find(p => p && p.section === bloc.nom) || plan[i] || {};
+      return { nom: bloc.nom, lignes: bloc.lignes, resume: trouve.resume || '', scene: trouve.scene || bloc.lignes.map(l => l.text).join(' ') };
+    });
+
+    planActuel.forEach(entree => {
+      const card = document.createElement('div');
+      card.className = 'card nested'; card.style.marginTop = '10px';
+      const h = document.createElement('h2'); h.style.fontSize = '13px'; h.textContent = entree.nom;
+      const paroles = document.createElement('p'); paroles.className = 'hint'; paroles.style.margin = '2px 0 6px';
+      paroles.textContent = entree.lignes.map(l => l.text).join(' / ');
+      const lbl = document.createElement('label'); lbl.style.fontSize = '12px'; lbl.textContent = 'Scène à illustrer (modifiable avant de générer l\'image)';
+      const ta = document.createElement('textarea'); ta.style.minHeight = '70px'; ta.value = entree.scene;
+      entree.sceneEl = ta;
+      card.append(h, paroles, lbl, ta);
+      box.appendChild(card);
+    });
+
+    status.innerHTML = `<span class="ok">Plan généré (${planActuel.length} scène(s)) — relis/corrige si besoin, puis lance l'étape 2.</span>`;
+    $('btnStoryboard').disabled = false;
+  }catch(err){
+    status.innerHTML = `<span class="bad">Échec : ${escHtml(err.message || String(err))}</span>`;
+  }finally{
+    $('btnPlanStoryboard').disabled = false;
+  }
+};
+
+$('btnStoryboard').onclick = async () => {
+  const status = $('storyboardStatus'), box = $('storyboardResult');
+  const key = $('geminiKey').value.trim();
+  if(!key){ status.innerHTML = '<span class="bad">Colle ta clé API Gemini (onglet 1, carte 3).</span>'; return; }
+  if(!planActuel || !planActuel.length){ status.innerHTML = '<span class="bad">Génère d\'abord le plan de scènes (étape 1 ci-dessus).</span>'; return; }
 
   box.innerHTML = '';
   $('btnStoryboard').disabled = true;
   const style = $('ficheStyle').value.trim();
   const continuite = $('continuiteStoryboard').checked;
-  state.storyboard = new Array(blocs.length).fill(null);
+  const format = $('formatImage').value;
+  state.storyboard = new Array(planActuel.length).fill(null);
   let ok = 0, precedente = null;
-  for(let k = 0; k < blocs.length; k++){
-    const bloc = blocs[k], idx = k;
-    const nom = bloc.nom;
-    status.innerHTML = `Génération "${escHtml(nom)}"… (${ok}/${blocs.length})`;
+  for(let k = 0; k < planActuel.length; k++){
+    const entree = planActuel[k], idx = k;
+    const nom = entree.nom;
+    // Lu au moment de générer : reflète les corrections faites dans le plan.
+    const sceneTexte = (entree.sceneEl ? entree.sceneEl.value.trim() : '') || entree.scene || entree.lignes.map(l => l.text).join(' ');
+    status.innerHTML = `Génération "${escHtml(nom)}"… (${ok}/${planActuel.length})`;
     try{
-      const prompt = promptVisuelSection(nom, bloc.lignes, style);
+      const prompt = promptSceneStoryboard(nom, sceneTexte, style);
       // Cohérence de personnage : la scène précédente sert aussi de référence
       // à celle-ci, en plus de l'image uploadée éventuelle (voir case à cocher).
       const refsSupp = (continuite && precedente) ? [precedente] : [];
-      const img = await callGeminiImageChain(buildImageParts(prompt, refsSupp));
+      const img = await callGeminiImageChain(buildImageParts(prompt, refsSupp), format);
       const dataUrl = `data:${img.mime};base64,${img.data}`;
       const item = { label: nom, dataUrl, img: null };
       state.storyboard[idx] = item;
@@ -2105,7 +2219,7 @@ $('btnStoryboard').onclick = async () => {
       box.appendChild(card);
     }
   }
-  status.innerHTML = `<span class="ok">${ok}/${blocs.length} image(s) générée(s).</span>`;
+  status.innerHTML = `<span class="ok">${ok}/${planActuel.length} image(s) générée(s).</span>`;
   $('btnStoryboard').disabled = false;
   $('btnTeleTout').style.display = ok ? 'inline-block' : 'none';
   updateApercu();
@@ -2179,6 +2293,42 @@ function resolutionExport(){
   return { w: 1280, h: 720 };
 }
 
+/* Retour de terrain : "les images ne s'animent pas du tout, juste un petit
+   zoom" — le zoom initial (+10 % sur toute la durée de la scène) était trop
+   discret pour se voir. Un vrai vidéaste alterne aussi les mouvements
+   (zoom avant, travelling dans les 4 directions, dézoom) d'un plan à
+   l'autre plutôt que de répéter le même effet identique en boucle — sans
+   ça, même un zoom marqué finit par avoir l'air statique/mécanique. */
+function easeInOutCubic(x){
+  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+}
+const MOUVEMENTS_CAMERA = [
+  { zA: 1.00, zB: 1.30, pX: 0,  pY: 0  }, // zoom avant centré
+  { zA: 1.06, zB: 1.32, pX: -1, pY: 0  }, // zoom + travelling gauche → droite
+  { zA: 1.06, zB: 1.32, pX: 1,  pY: 0  }, // zoom + travelling droite → gauche
+  { zA: 1.08, zB: 1.30, pX: 0,  pY: -1 }, // zoom + travelling haut → bas
+  { zA: 1.30, zB: 1.06, pX: 0,  pY: 1  }  // dézoom + travelling bas → haut
+];
+function dessinerImageAnimee(ctx, canvas, im, progresBrut, indexScene, alpha){
+  const mvt = MOUVEMENTS_CAMERA[((indexScene % MOUVEMENTS_CAMERA.length) + MOUVEMENTS_CAMERA.length) % MOUVEMENTS_CAMERA.length];
+  const progres = easeInOutCubic(Math.min(1, Math.max(0, progresBrut)));
+  const zoom = mvt.zA + (mvt.zB - mvt.zA) * progres;
+  const echelleBase = Math.max(canvas.width / im.naturalWidth, canvas.height / im.naturalHeight);
+  const echelle = echelleBase * zoom;
+  const dw = im.naturalWidth * echelle, dh = im.naturalHeight * echelle;
+  // Le zoom fait dépasser l'image du cadre : cette marge est l'espace
+  // disponible pour le travelling (limité à 70 % pour ne jamais découvrir
+  // de bord vide).
+  const margeX = (dw - canvas.width) / 2, margeY = (dh - canvas.height) / 2;
+  const dx = (canvas.width - dw) / 2 + mvt.pX * margeX * progres * 0.7;
+  const dy = (canvas.height - dh) / 2 + mvt.pY * margeY * progres * 0.7;
+  if(alpha != null) ctx.globalAlpha = alpha;
+  ctx.drawImage(im, dx, dy, dw, dh);
+  if(alpha != null) ctx.globalAlpha = 1;
+}
+// Durée du fondu enchaîné entre deux scènes — un cut sec entre chaque
+// section donnait un diaporama plutôt qu'une vidéo "vivante".
+const DUREE_TRANSITION = 0.6;
 function dessinerFrameExport(ctx, canvas){
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -2188,12 +2338,17 @@ function dessinerFrameExport(ctx, canvas){
     const item = state.storyboard[sec.index];
     if(item && item.img && item.img.complete && item.img.naturalWidth){
       const duree = Math.max(0.1, sec.fin - sec.debut);
-      const progres = Math.min(1, Math.max(0, (t - sec.debut) / duree));
-      const zoom = 1 + 0.10 * progres; // zoom avant lent et continu sur toute la durée de la scène
-      const im = item.img;
-      const echelle = Math.max(canvas.width / im.naturalWidth, canvas.height / im.naturalHeight) * zoom;
-      const dw = im.naturalWidth * echelle, dh = im.naturalHeight * echelle;
-      ctx.drawImage(im, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
+      const ecoule = t - sec.debut;
+      const progres = ecoule / duree;
+      const restant = duree - ecoule;
+      const suivant = state.storyboard[sec.index + 1];
+      if(restant < DUREE_TRANSITION && suivant && suivant.img && suivant.img.complete && suivant.img.naturalWidth){
+        const alpha = 1 - (restant / DUREE_TRANSITION); // 0 → 1 pendant la transition
+        dessinerImageAnimee(ctx, canvas, item.img, progres, sec.index, 1 - alpha);
+        dessinerImageAnimee(ctx, canvas, suivant.img, 0, sec.index + 1, alpha);
+      } else {
+        dessinerImageAnimee(ctx, canvas, item.img, progres, sec.index, null);
+      }
     }
   }
   const li = state.playingIndex;
