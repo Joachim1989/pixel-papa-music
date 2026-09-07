@@ -26,7 +26,9 @@ travail :
    mot par mot (estimation, à vérifier).
 4. **Repères animation** — le même minutage en `.json` (lignes + sections).
 5. **Pack SEO / pub** — titres, description YouTube avec chapitres réels,
-   tags, hashtags.
+   tags, et une **légende Instagram/TikTok prête à coller** (accroche +
+   texte de pub qui vend le morceau + appel à l'action + hashtags), plus
+   les hashtags seuls pour un premier commentaire séparé.
 6. **Hook / teaser** — repère le refrain (balise ou répétition) et
    propose une fenêtre de clip courte pour Shorts/Reels.
 7. **Visuels** — vignette YouTube + storyboard **en deux étapes** :

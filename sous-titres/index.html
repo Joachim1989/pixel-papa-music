@@ -400,7 +400,7 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
 <section id="tab-seo" class="tabpanel">
   <div class="card" style="max-width:640px">
     <h2>Pack SEO / publication</h2>
-    <p class="hint">Titres, description avec chapitres, tags et hashtags — générés à partir des paroles. Les horodatages des chapitres viennent de ton calage réel ([Refrain]/[Couplet]), jamais inventés par l'IA : seule la partie texte est générée.</p>
+    <p class="hint">Titres, description YouTube avec chapitres, tags, et une légende Instagram/TikTok prête à coller (accroche + texte de pub + appel à l'action + hashtags) — générés à partir des paroles. Les horodatages des chapitres viennent de ton calage réel ([Refrain]/[Couplet]), jamais inventés par l'IA : seule la partie texte est générée.</p>
     <label for="seoContexte">Contexte / univers (optionnel — genre, ambiance, public visé…)</label>
     <textarea id="seoContexte" style="min-height:70px" placeholder="ex. Rap pixel-art pour ados, univers rétro-gaming, ton second degré..."></textarea>
     <div class="row" style="margin-top:8px"><button id="btnSEO" class="primary">Générer le pack SEO</button></div>
@@ -543,7 +543,7 @@ const GUIDE_ETAPES = [
   { id:'soustitres', titre:'Sous-titres', pourquoi:"pour que les spectateurs puissent lire les paroles en même temps qu'ils écoutent, sur YouTube ou les réseaux.", comment:"une fois le calage terminé (onglet précédent), télécharge le fichier .srt ou .vtt et importe-le dans ton logiciel de montage." },
   { id:'karaoke', titre:'Karaoké', pourquoi:"pour un effet visuel où le texte se surligne en rythme — utile pour les vidéos où les paroles doivent « vivre » à l'écran.", comment:"choisis le mode (ligne entière ou mot par mot), télécharge le fichier .ass, importe-le comme les sous-titres." },
   { id:'animation', titre:'Repères animation', pourquoi:"donne l'instant exact (en secondes) de chaque ligne et section, pour animer à la main sans réécouter au casque à chaque fois.", comment:"télécharge le fichier .json et ouvre-le comme repère pendant le montage ou l'animation." },
-  { id:'seo', titre:'Pack SEO / pub', pourquoi:"pour que la vidéo se trouve plus facilement sur YouTube (titre, description, tags) et se partage bien sur les réseaux (hashtags).", comment:"remplis le titre et le contexte (onglet Calage), clique générer, copie ce qui te plaît." },
+  { id:'seo', titre:'Pack SEO / pub', pourquoi:"pour que la vidéo se trouve plus facilement sur YouTube (titre, description, tags) et se partage bien sur les réseaux (une vraie légende Instagram/TikTok prête à coller, pas juste des hashtags nus).", comment:"remplis le titre et le contexte (onglet Calage), clique générer, copie ce qui te plaît." },
   { id:'hook', titre:'Hook / teaser', pourquoi:"pour savoir quel passage de la chanson utiliser dans un Short/Reel de 15-30 secondes, sans le chercher à l'oreille.", comment:"clique détecter, écoute l'extrait proposé, copie les instants si ça convient." },
   { id:'visuels', titre:'Visuels', pourquoi:"pour avoir des images (vignette, décors) dans l'univers Pixel Papa sans savoir dessiner ni chercher ailleurs.", comment:"choisis un style (texte ou photo de référence), génère, télécharge — ou régénère si une scène ne plaît pas." },
   { id:'apercu', titre:'Aperçu', pourquoi:"pour voir approximativement ce que donnera la vidéo avant de perdre du temps à monter pour de vrai.", comment:"lance la lecture depuis l'onglet Calage, reviens ici pour regarder les scènes défiler avec les paroles." }
@@ -1538,15 +1538,30 @@ function buildAnimJSON(){
 $('btnJSON').onclick = () => { download("reperes-animation.json", buildAnimJSON(), "application/json"); marquerFaite('animation'); };
 
 /* ═══════════════════ 12. PACK SEO / PUB (onglet 5) ═══════════════════ */
+/* Retour de terrain : "pas de hashtags, de textes à mettre en légende" —
+   deux bugs distincts.
+   1. hashtags revenait vide : SEO_SCHEMA n'avait ni "description" par champ
+      ni "required" — même défaut déjà rencontré (et corrigé) sur
+      GENERATION_SCHEMA côté écriture, où ça faisait tout empiler dans un
+      seul champ. Sans contrainte, rien ne force le modèle à remplir CHAQUE
+      champ du schéma ; corrigé pareil : description + required partout.
+   2. Aucune vraie légende Instagram/TikTok n'existait — juste une liste de
+      hashtags nus. Ajout de 3 champs (accroche, explication "publicité",
+      appel à l'action) recomposés en un texte de légende prêt à coller,
+      hashtags inclus à la fin (voir buildLegendeInsta ci-dessous). */
 const SEO_SCHEMA = {
   type: "OBJECT",
   properties: {
-    titres: { type: "ARRAY", items: { type: "STRING" } },
-    description_intro: { type: "STRING" },
-    description_outro: { type: "STRING" },
-    tags: { type: "ARRAY", items: { type: "STRING" } },
-    hashtags: { type: "ARRAY", items: { type: "STRING" } }
-  }
+    titres: { type: "ARRAY", items: { type: "STRING" }, description: "3 propositions de titre de vidéo YouTube, accrocheuses, en français, sans emoji excessif." },
+    description_intro: { type: "STRING", description: "2 à 3 phrases d'intro pour la description YouTube (donne envie, ne récite pas les paroles)." },
+    description_outro: { type: "STRING", description: "2 à 3 phrases de fin de description YouTube (appel à l'action générique — s'abonner, découvrir d'autres morceaux — sans inventer de lien ni de plateforme précise)." },
+    tags: { type: "ARRAY", items: { type: "STRING" }, description: "12 à 15 tags YouTube pertinents (mots-clés courts, sans #)." },
+    hook_legende: { type: "STRING", description: "Une phrase d'accroche courte et percutante : la toute première ligne d'une légende Instagram/TikTok, celle qui donne envie de cliquer sur \"plus\"." },
+    explication_legende: { type: "STRING", description: "2 à 4 phrases qui VENDENT le morceau pour la légende Instagram/TikTok : de quoi ça parle, pourquoi ce morceau existe, ce que l'auditeur va ressentir — un vrai texte de publicité, pas un résumé des paroles." },
+    appel_action_legende: { type: "STRING", description: "Une phrase d'appel à l'action pour la fin de la légende (écouter en entier, partager, commenter, s'abonner...)." },
+    hashtags: { type: "ARRAY", items: { type: "STRING" }, description: "10 à 15 hashtags Instagram/TikTok pertinents (avec #, sans espace), mélange de hashtags larges (rap, pixel art, musique famille...) et de niche (moins généralistes, plus ciblés)." }
+  },
+  required: ["titres", "description_intro", "description_outro", "tags", "hook_legende", "explication_legende", "appel_action_legende", "hashtags"]
 };
 
 function fmtChapTime(sec){
@@ -1621,13 +1636,26 @@ function blocTitres(titres){
   });
   return card;
 }
+/* Accroche + explication "publicité" + appel à l'action + hashtags, mis
+   bout à bout en un texte prêt à coller tel quel en légende Instagram/
+   TikTok — c'est le texte demandé ("permettre de faire la publicité, de
+   donner une explication, une phrase, un hook"), pas juste une liste de
+   hashtags nus. */
+function buildLegendeInsta(data){
+  const corps = [data.hook_legende, data.explication_legende, data.appel_action_legende]
+    .map(s => (s || '').trim()).filter(Boolean).join('\n\n');
+  const hashtagsTxt = (data.hashtags || []).join(' ');
+  return [corps, hashtagsTxt].filter(Boolean).join('\n\n').trim();
+}
+
 function renderSEOResult(data, chapitres, description){
   const box = $('seoResult');
   box.innerHTML = '';
   box.appendChild(blocTitres(data.titres));
+  box.appendChild(champSEO('Légende Instagram / TikTok (accroche + pub + appel à l\'action + hashtags)', buildLegendeInsta(data)));
   box.appendChild(champSEO('Description' + (chapitres.length ? ' (avec chapitres)' : ''), description));
   box.appendChild(champSEO('Tags YouTube', (data.tags || []).join(', ')));
-  box.appendChild(champSEO('Hashtags réseaux sociaux', (data.hashtags || []).join(' ')));
+  box.appendChild(champSEO('Hashtags seuls (à coller en 1er commentaire par ex.)', (data.hashtags || []).join(' ')));
 }
 
 $('btnSEO').onclick = async () => {
@@ -1657,7 +1685,10 @@ ${paroles}
 - "description_intro" : 2 à 3 phrases d'intro pour la description YouTube (donne envie, ne récite pas les paroles).
 - "description_outro" : 2 à 3 phrases de fin de description (appel à l'action générique — s'abonner, découvrir d'autres morceaux — n'invente aucun lien ni plateforme précise).
 - "tags" : 12 à 15 tags YouTube pertinents (mots-clés courts, sans #).
-- "hashtags" : 8 à 10 hashtags courts pour la légende TikTok/Instagram (avec #, sans espace).
+- "hook_legende" : UNE phrase d'accroche courte pour démarrer une légende Instagram/TikTok — percutante, donne envie de lire la suite.
+- "explication_legende" : 2 à 4 phrases qui VENDENT le morceau (pourquoi il existe, de quoi ça parle, ce que ça donne à entendre) — un vrai texte de publicité, pas un résumé des paroles ni une répétition du hook.
+- "appel_action_legende" : une phrase d'appel à l'action pour finir la légende (écouter en entier, partager, mettre en commentaire un mot/emoji...).
+- "hashtags" : 10 à 15 hashtags pour Instagram/TikTok (avec #, sans espace) — mélange de hashtags larges (genre musical, thème) et de niche (plus ciblés, moins saturés).
 
 Ne mentionne AUCUN horodatage ni minutage : les chapitres sont ajoutés séparément par l'application, à partir du calage réel.`;
 
