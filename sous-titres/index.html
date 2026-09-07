@@ -483,6 +483,17 @@ Une ligne = une ligne de sous-titre à caler."></textarea>
       <div id="apercuSousTitre" style="position:absolute;left:0;right:0;bottom:0;padding:14px;text-align:center;font-family:var(--cond);font-weight:700;font-size:20px;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.8);background:linear-gradient(transparent,rgba(0,0,0,.55))"></div>
     </div>
   </div>
+
+  <div class="card" style="max-width:640px">
+    <h2>Exporter une vidéo animée (brouillon)</h2>
+    <p class="hint">Anime les images du storyboard (léger zoom continu façon « Ken Burns ») avec les sous-titres par-dessus, et enregistre le résultat — image + son du lecteur audio — directement dans le navigateur, sans montage externe. À savoir avant de lancer : l'enregistrement se fait en <strong>temps réel</strong> (une chanson de 3&nbsp;min prend 3&nbsp;min à générer, laisse l'onglet ouvert et actif jusqu'à la fin), produit un fichier <strong>.webm</strong> (pas de .mp4 sans encodeur serveur), et ne fonctionne que sur les navigateurs qui savent capturer l'audio d'une balise vidéo/audio (Chrome, Firefox, Edge — pas Safari/iOS). C'est un brouillon utilisable tel quel pour un post rapide, ou une base à reprendre dans CapCut/VN pour un montage plus abouti.</p>
+    <canvas id="canvasExport" style="width:100%;border-radius:10px;border:1px solid var(--border);display:none;margin-top:4px;margin-bottom:10px;background:#000"></canvas>
+    <div class="row">
+      <button id="btnExportVideo" class="primary">🎬 Générer la vidéo</button>
+      <button id="btnStopExportVideo" class="small ghost" style="display:none">Arrêter</button>
+    </div>
+    <div class="status" id="exportVideoStatus"></div>
+  </div>
 </section>
 
 <script>
@@ -1936,8 +1947,10 @@ function buildImageParts(promptTexte, referencesSupp){
 function promptVisuelSection(label, lignes, styleSheet){
   return `${styleSheet}
 
-Illustre CE QUI SE PASSE pendant la section "${label}" d'une chanson Pixel Papa, dans ce style — une action, un geste ou un moment précis suggéré par ces paroles (une vraie scène avec de l'action, pas juste un portrait ou une ambiance statique), ne reproduis AUCUN texte ni lettre dans l'image, à partir de :
+Voici les paroles EXACTES de la section "${label}" (dans l'ordre de la chanson) :
 ${lignes.map(l => l.text).join('\n')}
+
+Avant de dessiner, repère CONCRÈTEMENT ce que CES lignes précises racontent à ce moment de la chanson (qui fait quoi, où, avec quel geste ou quel objet) — puis illustre PRÉCISÉMENT cette action-là, et seulement elle. N'illustre pas une ambiance générale de la chanson ni le contenu d'une autre section : la scène doit correspondre spécifiquement à ce que disent CES paroles-ci, dans ce style. Une vraie scène avec de l'action (pas un portrait ni un plan statique). Ne reproduis AUCUN texte ni lettre dans l'image.
 
 Cette scène doit être visuellement DISTINCTE des autres scènes du storyboard (cadrage, pose et décor différents), même si le personnage reste reconnaissable. Format ${formatChoisi()}, une seule scène cohérente, sans texte ni lettres visibles dans l'image.`;
 }
@@ -1951,6 +1964,17 @@ function downloadDataUrl(filename, dataUrl){
   const a = document.createElement('a');
   a.href = dataUrl; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
+}
+/* Précharge l'image du storyboard en objet Image() dessinable sur un canvas
+   (voir l'export vidéo, onglet 8) — sans ça il faudrait attendre le
+   chargement au moment de cliquer sur "Générer la vidéo", juste avant
+   player.play(), ce qui casserait le geste utilisateur requis par certains
+   navigateurs pour autoriser la lecture. En préchargeant dès la génération
+   de chaque scène, l'image est presque toujours déjà prête. */
+function chargerImageDansItem(item, dataUrl){
+  const im = new Image();
+  im.onload = () => { item.img = im; };
+  im.src = dataUrl;
 }
 /* onRegenerate(nouvelleDataUrl) : callback optionnel appelé après une
    régénération réussie — sert au storyboard pour garder state.storyboard
@@ -2026,6 +2050,22 @@ $('btnStoryboard').onclick = async () => {
   flush();
   if(!blocs.length){ status.innerHTML = '<span class="bad">Ajoute des paroles avec des balises [Couplet]/[Refrain] (onglet 1) — le storyboard s\'appuie dessus pour découper les scènes.</span>'; return; }
 
+  // Une même balise ([Refrain] surtout) revient plusieurs fois dans une
+  // chanson : sans numérotation, deux scènes différentes s'appellent toutes
+  // les deux juste "Refrain", aussi bien dans le titre de la carte que dans
+  // le prompt envoyé au modèle — qui n'a alors aucun moyen de savoir
+  // laquelle des occurrences illustrer. C'est une des causes du retour
+  // "ça n'a pas l'air de suivre la logique des textes" : on numérote donc
+  // chaque occurrence par rapport aux autres du même nom (ex. "Refrain 1/2").
+  const totalParLabel = {};
+  blocs.forEach(b => { const k = b.label || 'Intro'; totalParLabel[k] = (totalParLabel[k] || 0) + 1; });
+  const vus = {};
+  blocs.forEach(b => {
+    const k = b.label || 'Intro';
+    vus[k] = (vus[k] || 0) + 1;
+    b.nom = totalParLabel[k] > 1 ? `${k} ${vus[k]}/${totalParLabel[k]}` : k;
+  });
+
   box.innerHTML = '';
   $('btnStoryboard').disabled = true;
   const style = $('ficheStyle').value.trim();
@@ -2034,7 +2074,7 @@ $('btnStoryboard').onclick = async () => {
   let ok = 0, precedente = null;
   for(let k = 0; k < blocs.length; k++){
     const bloc = blocs[k], idx = k;
-    const nom = bloc.label || 'Intro';
+    const nom = bloc.nom;
     status.innerHTML = `Génération "${escHtml(nom)}"… (${ok}/${blocs.length})`;
     try{
       const prompt = promptVisuelSection(nom, bloc.lignes, style);
@@ -2043,10 +2083,14 @@ $('btnStoryboard').onclick = async () => {
       const refsSupp = (continuite && precedente) ? [precedente] : [];
       const img = await callGeminiImageChain(buildImageParts(prompt, refsSupp));
       const dataUrl = `data:${img.mime};base64,${img.data}`;
-      state.storyboard[idx] = { label: nom, dataUrl };
+      const item = { label: nom, dataUrl, img: null };
+      state.storyboard[idx] = item;
+      chargerImageDansItem(item, dataUrl);
       state.visualsGenerated = true; marquerFaite('visuels');
       box.appendChild(blocImage(nom, prompt, img, (nouvelleDataUrl) => {
-        state.storyboard[idx] = { label: nom, dataUrl: nouvelleDataUrl };
+        const itemRegen = { label: nom, dataUrl: nouvelleDataUrl, img: null };
+        state.storyboard[idx] = itemRegen;
+        chargerImageDansItem(itemRegen, nouvelleDataUrl);
         updateApercu();
       }));
       precedente = { mime: img.mime, data: img.data };
@@ -2077,12 +2121,12 @@ $('btnTeleTout').onclick = () => {
 };
 
 /* ═══════════════════ 15. APERÇU ANIMÉ (onglet 8) ═══════════════════
-   Prévisualisation client uniquement (aucun export vidéo réel — hors de
-   portée d'une simple page statique) : affiche l'image du storyboard qui
-   correspond à la section en cours de lecture, avec la ligne en cours en
-   sous-titre par-dessus. Réutilise sectionMarkers() (mêmes blocs que le
-   storyboard et le pack SEO) pour rester aligné sans nouvelle logique de
-   découpage. */
+   Prévisualisation client : affiche l'image du storyboard qui correspond
+   à la section en cours de lecture, avec la ligne en cours en sous-titre
+   par-dessus. Réutilise sectionMarkers() (mêmes blocs que le storyboard et
+   le pack SEO) pour rester aligné sans nouvelle logique de découpage.
+   L'export vidéo réel (avec mouvement + audio, voir plus bas) réutilise
+   aussi sectionMarkers() et state.playingIndex. */
 function indexSectionEnCours(t){
   const marks = sectionMarkers();
   for(let k = 0; k < marks.length; k++){
@@ -2101,6 +2145,159 @@ function updateApercu(){
   if(item) img.src = item.dataUrl;
   sub.textContent = state.playingIndex >= 0 ? state.lines[state.playingIndex].text : '';
 }
+
+/* ═══════════════════ 16. EXPORT VIDÉO ANIMÉE (onglet 8) ═══════════════════
+   Anime chaque image du storyboard (léger zoom continu façon « Ken Burns »,
+   plus lisible et moins coûteux à calculer qu'un vrai travelling) sur un
+   <canvas>, dessine le sous-titre en cours par-dessus, et enregistre le
+   tout — image ET son du lecteur audio — avec MediaRecorder. Pas de moteur
+   de rendu hors-ligne ici : l'enregistrement tourne en TEMPS RÉEL, à la
+   vitesse de lecture normale (⇒ ne pas changer $('vitesse') pendant
+   l'export, sous peine d'un son décalé/accéléré dans le fichier), et
+   produit un .webm — MediaRecorder ne sait pas encoder de .mp4 côté
+   navigateur. Repose sur canvas.captureStream() et
+   HTMLMediaElement.captureStream() : disponibles sur Chrome/Firefox/Edge,
+   absents sur Safari/iOS — on le détecte et on prévient plutôt que
+   d'échouer en silence. */
+const FONT_COND_STACK = '"Avenir Next Condensed","HelveticaNeue-CondensedBold","Arial Narrow",Impact,sans-serif';
+
+function fenetreSectionActuelle(instant){
+  const marks = sectionMarkers();
+  if(!marks.length) return null;
+  for(let k = 0; k < marks.length; k++){
+    const debut = marks[k].t;
+    const fin = k + 1 < marks.length ? marks[k+1].t : (player.duration || debut + 5);
+    if(instant >= debut && instant < fin) return { debut, fin, index: k };
+  }
+  return null;
+}
+
+function resolutionExport(){
+  const v = $('formatImage') ? $('formatImage').value : '16:9';
+  if(v === '9:16') return { w: 720, h: 1280 };
+  if(v === '1:1') return { w: 1080, h: 1080 };
+  return { w: 1280, h: 720 };
+}
+
+function dessinerFrameExport(ctx, canvas){
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const t = player.currentTime;
+  const sec = fenetreSectionActuelle(t);
+  if(sec){
+    const item = state.storyboard[sec.index];
+    if(item && item.img && item.img.complete && item.img.naturalWidth){
+      const duree = Math.max(0.1, sec.fin - sec.debut);
+      const progres = Math.min(1, Math.max(0, (t - sec.debut) / duree));
+      const zoom = 1 + 0.10 * progres; // zoom avant lent et continu sur toute la durée de la scène
+      const im = item.img;
+      const echelle = Math.max(canvas.width / im.naturalWidth, canvas.height / im.naturalHeight) * zoom;
+      const dw = im.naturalWidth * echelle, dh = im.naturalHeight * echelle;
+      ctx.drawImage(im, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
+    }
+  }
+  const li = state.playingIndex;
+  if(li >= 0 && state.lines[li] && state.lines[li].type === 'line'){
+    const texte = state.lines[li].text;
+    const taille = Math.round(canvas.height * 0.045);
+    ctx.font = `700 ${taille}px ${FONT_COND_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    const y = canvas.height - canvas.height * 0.035;
+    const largeur = ctx.measureText(texte).width;
+    ctx.fillStyle = 'rgba(0,0,0,.55)';
+    ctx.fillRect(canvas.width / 2 - largeur / 2 - 24, y - taille - 12, largeur + 48, taille + 30);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(texte, canvas.width / 2, y);
+  }
+}
+
+let exportVideoEnCours = false;
+
+$('btnExportVideo').onclick = async () => {
+  const statusEl = $('exportVideoStatus');
+  if(exportVideoEnCours) return;
+  if(!state.storyboard.some(Boolean)){ statusEl.innerHTML = '<span class="bad">Génère d\'abord le storyboard (onglet 7).</span>'; return; }
+  if(!state.audioLoaded){ statusEl.innerHTML = '<span class="bad">Charge d\'abord l\'audio (onglet 1).</span>'; return; }
+  if(!player.duration || !isFinite(player.duration)){ statusEl.innerHTML = '<span class="bad">L\'audio n\'est pas encore prêt — attends qu\'il finisse de charger, puis réessaie.</span>'; return; }
+
+  const canvas = $('canvasExport');
+  if(!canvas.captureStream){ statusEl.innerHTML = '<span class="bad">Ce navigateur ne sait pas capturer un canvas en vidéo — essaie Chrome, Firefox ou Edge (pas Safari/iOS).</span>'; return; }
+  if(!player.captureStream && !player.mozCaptureStream){ statusEl.innerHTML = '<span class="bad">Ce navigateur ne sait pas capturer l\'audio du lecteur — essaie Chrome, Firefox ou Edge (pas Safari/iOS).</span>'; return; }
+  if(!window.MediaRecorder){ statusEl.innerHTML = '<span class="bad">MediaRecorder indisponible sur ce navigateur.</span>'; return; }
+
+  const { w, h } = resolutionExport();
+  canvas.width = w; canvas.height = h;
+  canvas.style.aspectRatio = `${w} / ${h}`;
+  canvas.style.display = 'block';
+  const ctx = canvas.getContext('2d');
+
+  let flux;
+  try{
+    const fluxVideo = canvas.captureStream(30);
+    const fluxAudioSrc = player.captureStream ? player.captureStream() : player.mozCaptureStream();
+    flux = new MediaStream([...fluxVideo.getVideoTracks(), ...fluxAudioSrc.getAudioTracks()]);
+  }catch(err){
+    statusEl.innerHTML = `<span class="bad">Échec de la capture audio/vidéo : ${escHtml(err.message || String(err))}</span>`;
+    return;
+  }
+
+  const mimeCandidats = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  const mime = mimeCandidats.find(m => MediaRecorder.isTypeSupported(m)) || '';
+  const chunks = [];
+  let recorder;
+  try{
+    recorder = new MediaRecorder(flux, mime ? { mimeType: mime } : undefined);
+  }catch(err){
+    statusEl.innerHTML = `<span class="bad">Impossible de créer l'enregistreur : ${escHtml(err.message || String(err))}</span>`;
+    return;
+  }
+  recorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+
+  exportVideoEnCours = true;
+  $('btnExportVideo').disabled = true;
+  $('btnStopExportVideo').style.display = 'inline-block';
+
+  let arret = false;
+  function boucle(){
+    if(arret) return;
+    dessinerFrameExport(ctx, canvas);
+    requestAnimationFrame(boucle);
+  }
+  const terminer = () => {
+    if(arret) return;
+    arret = true;
+    exportVideoEnCours = false;
+    player.removeEventListener('ended', terminer);
+    if(recorder.state !== 'inactive') recorder.stop();
+  };
+  recorder.onstop = () => {
+    $('btnExportVideo').disabled = false;
+    $('btnStopExportVideo').style.display = 'none';
+    if(!chunks.length){
+      statusEl.innerHTML = '<span class="bad">Aucune donnée enregistrée — réessaie (garde l\'onglet actif pendant l\'export).</span>';
+      return;
+    }
+    const blob = new Blob(chunks, { type: mime || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    downloadDataUrl('pixel-papa-video.webm', url);
+    statusEl.innerHTML = `<span class="ok">Vidéo générée (${(blob.size / 1024 / 1024).toFixed(1)} Mo) — téléchargement lancé.</span>`;
+  };
+
+  $('btnStopExportVideo').onclick = () => { player.pause(); terminer(); };
+  player.addEventListener('ended', terminer);
+
+  statusEl.innerHTML = '<span>Enregistrement en cours… laisse cet onglet ouvert et actif jusqu\'à la fin de la chanson.</span>';
+  player.currentTime = 0;
+  recorder.start();
+  boucle();
+  try{
+    await player.play();
+  }catch(err){
+    terminer();
+    statusEl.innerHTML = `<span class="bad">Impossible de démarrer la lecture : ${escHtml(err.message || String(err))}</span>`;
+  }
+};
 
 /* Les images générées (vignette/storyboard) ne sont jamais sauvées — elles
    coûtent des appels API, se perdent silencieusement à un simple

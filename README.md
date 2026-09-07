@@ -29,16 +29,22 @@ travail :
    tags, hashtags.
 6. **Hook / teaser** — repère le refrain (balise ou répétition) et
    propose une fenêtre de clip courte pour Shorts/Reels.
-7. **Visuels** — vignette YouTube + storyboard (une image par section),
-   générés directement (Gemini). Style calé sur une fiche éditable ou
-   extrait d'une image de référence (transfert de style/personnage,
-   comme le skill `style-transfer-portrait`) ; chaque scène est
-   régénérable (prompt éditable) ; cohérence de personnage d'une scène à
-   l'autre via chaînage ; format 16:9/9:16/1:1 au choix.
-8. **Aperçu** — previz dans le navigateur (pas un export vidéo) :
-   enchaîne les images du storyboard au bon timing avec les sous-titres
-   par-dessus, pour valider le rythme avant de monter dans
-   CapCut/VN/Canva.
+7. **Visuels** — vignette YouTube + storyboard (une image par section,
+   numérotée quand une balise revient plusieurs fois — ex. "Refrain
+   1/2" — pour que chaque scène colle aux paroles EXACTES de son
+   occurrence, pas un mélange des deux), générés directement (Gemini).
+   Style calé sur une fiche éditable ou extrait d'une image de référence
+   (transfert de style/personnage, comme le skill
+   `style-transfer-portrait`) ; chaque scène est régénérable (prompt
+   éditable) ; cohérence de personnage d'une scène à l'autre via
+   chaînage ; format 16:9/9:16/1:1 au choix.
+8. **Aperçu** — previz dans le navigateur (images du storyboard
+   enchaînées au bon timing avec les sous-titres par-dessus, pour valider
+   le rythme) **+ export vidéo animée** : anime les images (zoom continu
+   façon Ken Burns), incruste les sous-titres et enregistre le tout avec
+   l'audio réel via MediaRecorder — un vrai fichier `.webm` téléchargé,
+   généré entièrement dans le navigateur. Brouillon utilisable tel quel
+   ou base à reprendre dans CapCut/VN/Canva pour un montage plus abouti.
 
 ## Choix d'architecture qui comptent
 
@@ -47,9 +53,14 @@ travail :
   prononciation) avant de livrer — un bouton "générer" dans l'outil
   produirait un texte moins abouti en sautant ces vérifications.
   L'onglet 0 ne fait que relayer, pas écrire.
-- **Le montage reste externe** (CapCut/VN/Canva confirmés à l'usage) :
-  l'outil fournit les matériaux (sous-titres, karaoké, images, repères),
-  jamais un export vidéo — hors de portée d'une page statique.
+- **Le montage abouti reste externe** (CapCut/VN/Canva confirmés à
+  l'usage) : l'outil fournit les matériaux (sous-titres, karaoké, images,
+  repères) et, depuis l'export vidéo de l'onglet Aperçu, un brouillon
+  animé exploitable tel quel — mais pas un vrai moteur de montage
+  (transitions personnalisées, réglages fins, etc.). L'export vidéo tourne
+  en temps réel dans le navigateur (MediaRecorder + `canvas.captureStream`),
+  produit du `.webm` (pas de `.mp4` sans encodeur serveur) et demande
+  Chrome/Firefox/Edge (pas Safari/iOS, qui n'exposent pas ces API).
 - **Aucune image générée n'est sauvegardée** (trop lourd pour
   localStorage) : un avertissement bloque la fermeture/rafraîchissement
   tant qu'il y a des visuels non téléchargés dans la session.
