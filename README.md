@@ -31,13 +31,16 @@ travail :
    les hashtags seuls pour un premier commentaire séparé.
 6. **Hook / teaser** — repère le refrain (balise ou répétition) et
    propose une fenêtre de clip courte pour Shorts/Reels.
-7. **Visuels** — deux champs séparés en amont, comme en pré-prod
-   illustration : **Personnages** (photo(s) du personnage → génère une
-   **character sheet**, une planche de référence déjà dans le style
-   Pixel Papa, utilisée ensuite comme repère de personnage — nettement
-   plus fiable qu'une photo brute réinjectée à chaque scène) et
-   **Référence de style** (une image séparée, dédiée uniquement à
-   remplir la fiche de style texte, indépendante du personnage). Puis
+7. **Visuels** — deux volets séparés en amont, comme en pré-prod
+   illustration : **Personnages** — un ou PLUSIEURS (papa, enfant...),
+   chacun sa carte, ses photos et sa propre **character sheet** générée
+   indépendamment (planche de référence déjà dans le style Pixel Papa,
+   nettement plus fiable qu'une photo brute réinjectée à chaque scène ;
+   toutes les character sheets définies sont jointes ensemble, nommées,
+   à chaque génération pour rester reconnaissables individuellement) —
+   et **Référence de style** (une image séparée, dédiée uniquement à
+   remplir la fiche de style texte, indépendante du/des personnage(s)).
+   Puis
    vignette YouTube + storyboard **en deux étapes** : d'abord un plan
    de scènes (appel texte qui lit la chanson ENTIÈRE, comprend
    l'histoire racontée et propose, section par section — chaque
