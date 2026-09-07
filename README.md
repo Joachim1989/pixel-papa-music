@@ -31,20 +31,29 @@ travail :
    les hashtags seuls pour un premier commentaire séparé.
 6. **Hook / teaser** — repère le refrain (balise ou répétition) et
    propose une fenêtre de clip courte pour Shorts/Reels.
-7. **Visuels** — vignette YouTube + storyboard **en deux étapes** :
-   d'abord un plan de scènes (appel texte qui lit la chanson ENTIÈRE,
-   comprend l'histoire racontée et propose, section par section — chaque
+7. **Visuels** — deux champs séparés en amont, comme en pré-prod
+   illustration : **Personnages** (photo(s) du personnage → génère une
+   **character sheet**, une planche de référence déjà dans le style
+   Pixel Papa, utilisée ensuite comme repère de personnage — nettement
+   plus fiable qu'une photo brute réinjectée à chaque scène) et
+   **Référence de style** (une image séparée, dédiée uniquement à
+   remplir la fiche de style texte, indépendante du personnage). Puis
+   vignette YouTube + storyboard **en deux étapes** : d'abord un plan
+   de scènes (appel texte qui lit la chanson ENTIÈRE, comprend
+   l'histoire racontée et propose, section par section — chaque
    occurrence numérotée si une balise revient, ex. "Refrain 1/2" — une
-   scène cohérente avec les scènes voisines : personnage, décor, objets
-   qui reviennent ou évoluent logiquement), relisible et modifiable
-   avant de dépenser des générations d'image ; puis les images
-   elles-mêmes (Gemini), une par scène du plan. Style calé sur une fiche
-   éditable ou extrait d'une image de référence (transfert de
-   style/personnage, comme le skill `style-transfer-portrait`) ; chaque
-   scène est régénérable (prompt éditable) ; cohérence de personnage
-   d'une scène à l'autre via chaînage ; format 16:9/9:16/1:1 au choix,
-   réellement respecté (paramètre d'API `imageConfig.aspectRatio`, pas
-   qu'une phrase dans le prompt).
+   scène cohérente avec les scènes voisines), relisible et modifiable
+   avant de dépenser des générations d'image, avec une **photo
+   d'inspiration optionnelle par scène** (pose/action à évoquer,
+   distincte du personnage/style globaux) ; puis les images
+   elles-mêmes (Gemini). Chaque scène reste régénérable (prompt
+   éditable, sa propre photo d'inspiration) ; cohérence d'une scène à
+   l'autre via chaînage ; format 16:9/9:16/1:1 au choix, réellement
+   respecté (paramètre d'API `imageConfig.aspectRatio`, pas qu'une
+   phrase dans le prompt) ; **sélecteur de modèle d'image** qui
+   interroge le compte Google en direct (bouton "Voir les modèles
+   disponibles") pour choisir explicitement un modèle plus récent
+   plutôt que de deviner un nom figé dans le code.
 8. **Aperçu** — previz dans le navigateur (images du storyboard
    enchaînées au bon timing avec les sous-titres par-dessus, pour valider
    le rythme) **+ export vidéo animée** : anime les images (zoom marqué +
