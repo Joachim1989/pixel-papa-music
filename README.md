@@ -1,3 +1,8 @@
+> **⚠ Dépôt remplacé.** Cet outil (v1, 9 onglets) a été fusionné dans
+> **[pixel-papa-musique](https://github.com/Joachim1989/pixel-papa-musique)**, qui en reprend toutes les
+> fonctions (calage, sous-titres SRT/VTT, karaoké ASS, repères d'animation, pack SEO) et ajoute les projets
+> multiples, le stockage IndexedDB, les visuels et l'export vidéo. Ce dépôt n'est plus maintenu.
+
 # Pixel Papa — Musique
 
 Outils pour accélérer la production musicale Pixel Papa : de l'écriture
